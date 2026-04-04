@@ -12,6 +12,7 @@ import {
   type FormEvent,
 } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
+import { parseDeadlineToYmd } from "@/lib/deadline-date";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
 
 type ReporterOption = {
@@ -81,14 +82,6 @@ function urlMediaKind(url: string): "image" | "audio" | "pdf" | "unknown" {
   if (/\.(mp3|wav)(\?|$)/.test(u)) return "audio";
   if (/\.pdf(\?|$)/.test(u)) return "pdf";
   return "unknown";
-}
-
-function deadlineToLocalInput(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function IconTrash() {
@@ -306,7 +299,7 @@ export default function EditarPauta() {
       setArquivosUrls(normalizeArquivosUrls(row.arquivos_urls));
       setEditoria(row.editoria?.trim() || "Últimas Notícias");
       setReporterId(row.reporter_id?.trim() ?? "");
-      setDeadline(deadlineToLocalInput(row.deadline));
+      setDeadline(parseDeadlineToYmd(row.deadline) ?? "");
       setStatus(row.status?.trim() || "Sugerida");
       setLoading(false);
     };
@@ -448,7 +441,7 @@ export default function EditarPauta() {
       const anoAtual = new Date().getFullYear();
       const deadlineFinal = deadlineOriginal
         ? deadlineOriginal
-        : `${anoAtual}-12-31T18:00`;
+        : `${anoAtual}-12-31`;
 
       setSalvando(true);
       const supabase = createBrowserClient();
@@ -605,13 +598,13 @@ export default function EditarPauta() {
                   <input
                     id="edit-deadline"
                     name="deadline"
-                    type="datetime-local"
+                    type="date"
                     value={deadline}
                     onChange={(ev) => setDeadline(ev.target.value)}
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
                   />
                   <p className="mt-1 text-xs text-slate-500">
-                    Opcional. Se vazio, será usado 31/12 do ano atual às 18:00.
+                    Opcional. Se vazio, será usado 31/12 do ano atual.
                   </p>
                 </div>
                 <div>

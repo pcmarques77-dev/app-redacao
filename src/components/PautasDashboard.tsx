@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -10,6 +11,11 @@ import {
   type DragEvent,
 } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
+import {
+  deadlineYmdSortKey,
+  formatDeadlinePtBR,
+  parseDeadlineToYmd,
+} from "@/lib/deadline-date";
 import { STATUS_OPTIONS } from "@/lib/pauta-form-options";
 
 export type SortColumn =
@@ -33,22 +39,12 @@ function reporterNome(p: PautaRow): string {
   return p.reporter?.nome?.trim() || "—";
 }
 
-function deadlineToDatetimeLocalValue(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 function normalizeStatus(s: string | null): string {
   return (s ?? "").trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 }
 
 function deadlineSortValue(p: PautaRow): number | null {
-  if (!p.deadline) return null;
-  const t = new Date(p.deadline).getTime();
-  return Number.isNaN(t) ? null : t;
+  return deadlineYmdSortKey(p.deadline);
 }
 
 function compareText(a: string | null | undefined, b: string | null | undefined): number {
@@ -151,44 +147,6 @@ function statusCalendarChipClass(status: string | null): string {
     return `${base} border-violet-300 bg-violet-50 text-violet-900`;
   if (n.includes("fact")) return `${base} border-orange-300 bg-orange-50 text-orange-900`;
   return `${base} border-slate-300 bg-slate-50 text-slate-800`;
-}
-
-function deadlineToYmdLocal(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const y = d.getFullYear();
-  const m = d.getMonth() + 1;
-  const day = d.getDate();
-  return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-/** Preserva hora/minuto/segundo do prazo anterior ao mudar só o dia (YYYY-MM-DD). */
-function mergeDeadlineOntoYmd(previousIso: string | null, ymd: string): string {
-  const parts = ymd.split("-").map((x) => parseInt(x, 10));
-  const [ys, mo, ds] = parts;
-  if (
-    parts.length !== 3 ||
-    Number.isNaN(ys) ||
-    Number.isNaN(mo) ||
-    Number.isNaN(ds)
-  ) {
-    return new Date().toISOString();
-  }
-  const base = previousIso ? new Date(previousIso) : null;
-  if (base && !Number.isNaN(base.getTime())) {
-    const nd = new Date(
-      ys,
-      mo - 1,
-      ds,
-      base.getHours(),
-      base.getMinutes(),
-      base.getSeconds(),
-      base.getMilliseconds()
-    );
-    return nd.toISOString();
-  }
-  return new Date(ys, mo - 1, ds, 18, 0, 0, 0).toISOString();
 }
 
 function PautasCalendar({
@@ -365,6 +323,9 @@ function PautasCalendar({
                         <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
                           {p.editoria?.trim() || "—"}
                         </span>
+                        <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
+                          {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
+                        </span>
                       </Link>
                     </li>
                   ))}
@@ -404,14 +365,15 @@ function DeadlineInlineInput({
   saving: boolean;
   onChange: (pautaId: string, novaData: string) => void;
 }) {
+  const ymd = parseDeadlineToYmd(deadline);
   return (
     <input
-      type="datetime-local"
-      value={deadlineToDatetimeLocalValue(deadline)}
+      type="date"
+      value={ymd ?? ""}
       onChange={(e) => onChange(pautaId, e.target.value)}
       disabled={saving}
-      aria-label="Editar prazo da pauta"
-      className="max-w-[12rem] cursor-pointer rounded border-none bg-transparent p-0 text-sm text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
+      aria-label={`Editar prazo da pauta (${formatDeadlinePtBR(ymd)})`}
+      className="max-w-[11rem] cursor-pointer rounded border-none bg-transparent p-0 text-sm text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
     />
   );
 }
@@ -452,6 +414,7 @@ function StatusInlineSelect({
 }
 
 export function PautasDashboard() {
+  const router = useRouter();
   const [pautas, setPautas] = useState<PautaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -512,7 +475,7 @@ export function PautasDashboard() {
   const pautasPorDia = useMemo(() => {
     const m = new Map<string, PautaRow[]>();
     for (const p of pautasFiltradas) {
-      const key = deadlineToYmdLocal(p.deadline);
+      const key = parseDeadlineToYmd(p.deadline);
       if (!key) continue;
       const arr = m.get(key) ?? [];
       arr.push(p);
@@ -677,30 +640,26 @@ export function PautasDashboard() {
 
   const handleDeadlineChange = useCallback(
     async (pautaId: string, novaData: string) => {
-      if (!novaData.trim()) return;
+      const ymd = novaData.trim();
+      if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return;
       setFeedbackErro(null);
       const row = pautas.find((p) => p.id === pautaId);
       if (!row) return;
 
-      const d = new Date(novaData);
-      if (Number.isNaN(d.getTime())) return;
-      const newIso = d.toISOString();
-
-      const prevMs = row.deadline ? new Date(row.deadline).getTime() : NaN;
-      const nextMs = new Date(newIso).getTime();
-      if (!Number.isNaN(prevMs) && prevMs === nextMs) return;
+      const prevYmd = parseDeadlineToYmd(row.deadline);
+      if (prevYmd === ymd) return;
 
       const previousDeadline = row.deadline;
 
       setPautas((ps) =>
-        ps.map((p) => (p.id === pautaId ? { ...p, deadline: newIso } : p))
+        ps.map((p) => (p.id === pautaId ? { ...p, deadline: ymd } : p))
       );
       setDeadlineSavingId(pautaId);
 
       const supabase = createBrowserClient();
       const { error: upErr } = await supabase
         .from("pautas")
-        .update({ deadline: newIso })
+        .update({ deadline: ymd })
         .eq("id", pautaId);
 
       setDeadlineSavingId(null);
@@ -717,24 +676,30 @@ export function PautasDashboard() {
     [pautas]
   );
 
+  const handleLogout = useCallback(async () => {
+    const supabase = createBrowserClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
+  }, [router]);
+
   const handleCalendarDeadlineDrop = useCallback(
     async (pautaId: string, targetYmd: string) => {
       setFeedbackErro(null);
       const row = pautas.find((p) => p.id === pautaId);
       if (!row) return;
-      if (deadlineToYmdLocal(row.deadline) === targetYmd) return;
+      if (parseDeadlineToYmd(row.deadline) === targetYmd) return;
 
       const previousDeadline = row.deadline;
-      const newIso = mergeDeadlineOntoYmd(row.deadline, targetYmd);
 
       setPautas((ps) =>
-        ps.map((p) => (p.id === pautaId ? { ...p, deadline: newIso } : p))
+        ps.map((p) => (p.id === pautaId ? { ...p, deadline: targetYmd } : p))
       );
 
       const supabase = createBrowserClient();
       const { error: upErr } = await supabase
         .from("pautas")
-        .update({ deadline: newIso })
+        .update({ deadline: targetYmd })
         .eq("id", pautaId);
 
       if (upErr) {
@@ -753,19 +718,62 @@ export function PautasDashboard() {
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
       <header className="mb-10 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-            Pautas Viva
-          </h1>
+          <Link
+            href="/"
+            className="inline-block cursor-pointer rounded-sm text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+          >
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-slate-700 sm:text-3xl">
+              Pautas Viva
+            </h1>
+          </Link>
           <p className="mt-2 text-sm text-slate-600">
             Acompanhe prazos e status das suas pautas.
           </p>
         </div>
-        <Link
-          href="/nova-pauta"
-          className="inline-flex shrink-0 items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-        >
-          Nova Pauta
-        </Link>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+          <Link
+            href="/radar-pautas"
+            className="inline-flex items-center justify-center rounded-md border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-medium text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+          >
+            Radar de Pautas
+          </Link>
+          <Link
+            href="/admin"
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+          >
+            Admin de Usuários
+          </Link>
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            aria-label="Sair da conta"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" x2="9" y1="12" y2="12" />
+            </svg>
+            Sair
+          </button>
+          <Link
+            href="/nova-pauta"
+            className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+          >
+            Nova Pauta
+          </Link>
+        </div>
       </header>
 
       {loading && (

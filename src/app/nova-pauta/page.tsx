@@ -19,7 +19,7 @@ function pad2(n: number): string {
 }
 
 /**
- * Último dia útil (seg–sex) do mês corrente, às 18:00, no formato aceito pelo formulário/Postgres.
+ * Último dia útil (seg–sex) do mês corrente, apenas data (YYYY-MM-DD) para Postgres.
  */
 function getLastBusinessDayOfMonth(): string {
   const now = new Date();
@@ -31,7 +31,7 @@ function getLastBusinessDayOfMonth(): string {
   if (dow === 6) day -= 1;
   else if (dow === 0) day -= 2;
   const d = new Date(y, m, day);
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T18:00`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 const ALLOWED_MIME = new Set([
@@ -531,14 +531,14 @@ export default function NovaPautaPage() {
                   <input
                     id="deadline-nova"
                     name="deadline"
-                    type="datetime-local"
+                    type="date"
                     value={deadline}
                     onChange={(ev) => setDeadline(ev.target.value)}
                     className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
                   />
                   <p className="mt-1 text-xs text-slate-500">
                     Opcional. Se não informado, será usado o último dia útil do
-                    mês atual às 18:00.
+                    mês atual.
                   </p>
                 </div>
                 <div>
