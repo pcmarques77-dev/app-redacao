@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type FormEvent,
+} from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
 
@@ -10,6 +18,70 @@ type ReporterOption = {
   id: string;
   nome: string | null;
 };
+
+const ALLOWED_MIME = new Set([
+  "application/pdf",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/wave",
+  "image/jpeg",
+  "image/png",
+]);
+
+const ALLOWED_EXT = new Set(["pdf", "mp3", "wav", "jpg", "jpeg", "png"]);
+
+function isAllowedFile(file: File): boolean {
+  if (file.type && ALLOWED_MIME.has(file.type)) return true;
+  const ext = file.name.split(".").pop()?.toLowerCase();
+  return ext != null && ALLOWED_EXT.has(ext);
+}
+
+function cleanStorageFileName(originalName: string): string {
+  const base = originalName.replace(/[/\\]/g, "").trim() || "arquivo";
+  const cleaned = base
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9.-]/g, "_");
+  return cleaned || "arquivo";
+}
+
+function normalizeArquivosUrls(raw: unknown): string[] {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) {
+    return raw.filter((x): x is string => typeof x === "string" && x.trim() !== "");
+  }
+  if (typeof raw === "string") {
+    try {
+      const p = JSON.parse(raw) as unknown;
+      return Array.isArray(p)
+        ? p.filter((x): x is string => typeof x === "string" && x.trim() !== "")
+        : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function displayNameFromUrl(url: string): string {
+  try {
+    const seg = decodeURIComponent(
+      url.split("/").pop()?.split("?")[0] ?? "arquivo"
+    );
+    return seg.replace(/^\d+-/, "") || seg;
+  } catch {
+    return "arquivo";
+  }
+}
+
+function urlMediaKind(url: string): "image" | "audio" | "pdf" | "unknown" {
+  const u = url.toLowerCase();
+  if (/\.(jpe?g|png)(\?|$)/.test(u)) return "image";
+  if (/\.(mp3|wav)(\?|$)/.test(u)) return "audio";
+  if (/\.pdf(\?|$)/.test(u)) return "pdf";
+  return "unknown";
+}
 
 function deadlineToLocalInput(iso: string | null): string {
   if (!iso) return "";
@@ -19,23 +91,146 @@ function deadlineToLocalInput(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function IconTrash() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </svg>
+  );
+}
+
+function IconDocument() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="28"
+      height="28"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="text-slate-500"
+      aria-hidden
+    >
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+      <polyline points="14 2 14 8 20 8" />
+    </svg>
+  );
+}
+
+function ArquivoReferenciaItem({
+  url,
+  onRemove,
+}: {
+  url: string;
+  onRemove: () => void;
+}) {
+  const name = displayNameFromUrl(url);
+  const kind = urlMediaKind(url);
+
+  return (
+    <li className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="min-w-0 flex-1 break-all text-sm font-medium text-slate-800">
+          {name}
+        </p>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50"
+          aria-label={`Remover ${name}`}
+        >
+          <IconTrash />
+          Remover
+        </button>
+      </div>
+      <div className="mt-3">
+        {kind === "image" && (
+          <button
+            type="button"
+            onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+            className="block overflow-hidden rounded-md border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={url}
+              alt={name}
+              className="max-h-28 w-auto max-w-full object-contain"
+            />
+          </button>
+        )}
+        {kind === "audio" && (
+          <audio controls className="h-8 w-full" preload="metadata">
+            <source src={url} />
+          </audio>
+        )}
+        {kind === "pdf" && (
+          <div className="flex flex-wrap items-center gap-3">
+            <IconDocument />
+            <button
+              type="button"
+              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+              className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
+            >
+              Visualizar PDF
+            </button>
+          </div>
+        )}
+        {kind === "unknown" && (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-slate-700 underline hover:text-slate-900"
+          >
+            Abrir arquivo
+          </a>
+        )}
+      </div>
+    </li>
+  );
+}
+
 export default function EditarPauta() {
   const params = useParams();
   const id = params?.id as string;
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = useState(true);
   const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
 
   const [reporters, setReporters] = useState<ReporterOption[]>([]);
   const [tituloProvisorio, setTituloProvisorio] = useState("");
+  const [fontes, setFontes] = useState("");
   const [editoria, setEditoria] = useState("Últimas Notícias");
   const [reporterId, setReporterId] = useState("");
   const [deadline, setDeadline] = useState("");
   const [status, setStatus] = useState("Sugerida");
+  const [arquivosUrls, setArquivosUrls] = useState<string[]>([]);
 
   const [salvando, setSalvando] = useState(false);
   const [erroForm, setErroForm] = useState<string | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [uploadErro, setUploadErro] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +261,9 @@ export default function EditarPauta() {
         supabase.from("usuarios").select("id, nome").order("nome", { ascending: true }),
         supabase
           .from("pautas")
-          .select("titulo_provisorio, editoria, deadline, status, reporter_id")
+          .select(
+            "titulo_provisorio, fontes, arquivos_urls, editoria, deadline, status, reporter_id"
+          )
           .eq("id", id)
           .maybeSingle(),
       ]);
@@ -95,6 +292,8 @@ export default function EditarPauta() {
 
       const row = pautaRes.data as {
         titulo_provisorio: string | null;
+        fontes: string | null;
+        arquivos_urls: unknown;
         editoria: string | null;
         deadline: string | null;
         status: string | null;
@@ -103,6 +302,8 @@ export default function EditarPauta() {
 
       setReporters((repRes.data as ReporterOption[]) ?? []);
       setTituloProvisorio(row.titulo_provisorio?.trim() ?? "");
+      setFontes(row.fontes?.trim() ?? "");
+      setArquivosUrls(normalizeArquivosUrls(row.arquivos_urls));
       setEditoria(row.editoria?.trim() || "Últimas Notícias");
       setReporterId(row.reporter_id?.trim() ?? "");
       setDeadline(deadlineToLocalInput(row.deadline));
@@ -116,6 +317,106 @@ export default function EditarPauta() {
       cancelled = true;
     };
   }, [id]);
+
+  const processFilesForUpload = useCallback(
+    async (files: FileList | File[]) => {
+      const list = Array.from(files);
+      if (list.length === 0) return;
+
+      const rejected = list.filter((f) => !isAllowedFile(f));
+      if (rejected.length > 0) {
+        setUploadErro(
+          "Use apenas PDF, MP3, WAV, JPG ou PNG."
+        );
+        return;
+      }
+
+      setUploadErro(null);
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!url?.trim() || !key?.trim()) {
+        setUploadErro("Supabase não configurado (.env.local).");
+        return;
+      }
+
+      if (!id?.trim()) return;
+
+      setUploadBusy(true);
+      const supabase = createBrowserClient();
+      const novasUrls: string[] = [];
+
+      try {
+        let stamp = Date.now();
+        for (const file of list) {
+          const cleanFileName = cleanStorageFileName(file.name);
+          const objectPath = `${stamp}-${cleanFileName}`;
+          stamp += 1;
+
+          const { data: upData, error: upErr } = await supabase.storage
+            .from("arquivos_pauta")
+            .upload(objectPath, file, {
+              cacheControl: "3600",
+              upsert: false,
+              contentType: file.type || undefined,
+            });
+
+          if (upErr) {
+            setUploadErro(upErr.message || "Falha no upload.");
+            break;
+          }
+
+          const { data: pub } = supabase.storage
+            .from("arquivos_pauta")
+            .getPublicUrl(upData.path);
+
+          if (pub?.publicUrl) novasUrls.push(pub.publicUrl);
+        }
+
+        if (novasUrls.length > 0) {
+          setArquivosUrls((prev) => [...prev, ...novasUrls]);
+        }
+      } finally {
+        setUploadBusy(false);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    },
+    [id]
+  );
+
+  const handleFileInputChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (files?.length) void processFilesForUpload(files);
+    },
+    [processFilesForUpload]
+  );
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragActive(false);
+      const files = e.dataTransfer.files;
+      if (files?.length) void processFilesForUpload(files);
+    },
+    [processFilesForUpload]
+  );
+
+  const removeArquivoAt = useCallback((index: number) => {
+    setArquivosUrls((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   const handleSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
@@ -155,6 +456,8 @@ export default function EditarPauta() {
         .from("pautas")
         .update({
           titulo_provisorio: titulo,
+          fontes: fontes.trim() || null,
+          arquivos_urls: arquivosUrls,
           editoria,
           deadline: deadlineFinal,
           status,
@@ -171,14 +474,24 @@ export default function EditarPauta() {
 
       router.push("/");
     },
-    [deadline, editoria, id, reporterId, router, status, tituloProvisorio]
+    [
+      arquivosUrls,
+      deadline,
+      editoria,
+      fontes,
+      id,
+      reporterId,
+      router,
+      status,
+      tituloProvisorio,
+    ]
   );
 
   const formularioPronto = !loading && !erroCarregamento;
 
   return (
     <div className="min-h-screen bg-slate-100/80">
-      <div className="mx-auto flex min-h-screen max-w-lg flex-col px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-screen max-w-2xl flex-col px-4 py-8 sm:px-6 lg:max-w-3xl lg:px-8">
         <div className="mb-6">
           <Link
             href="/"
@@ -191,10 +504,11 @@ export default function EditarPauta() {
         <div className="flex flex-1 flex-col justify-center pb-12">
           <header className="mb-8 text-center">
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-              Editar Pauta
+              Apuração da pauta
             </h1>
             <p className="mt-2 text-sm text-slate-600">
-              Atualize os dados da pauta e salve para aplicar no sistema.
+              Fontes, referências e dados da pauta — salve para sincronizar com o
+              painel.
             </p>
           </header>
 
@@ -218,30 +532,6 @@ export default function EditarPauta() {
                     Nenhum repórter encontrado. Cadastre usuários no Supabase.
                   </p>
                 )}
-                <div>
-                  <label
-                    htmlFor="edit-reporter"
-                    className="block text-sm font-medium text-slate-700"
-                  >
-                    Repórter
-                  </label>
-                  <select
-                    id="edit-reporter"
-                    name="reporter_id"
-                    value={reporterId}
-                    onChange={(ev) => setReporterId(ev.target.value)}
-                    required
-                    disabled={reporters.length === 0}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50"
-                  >
-                    <option value="">Selecione o repórter</option>
-                    {reporters.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.nome?.trim() || "Sem nome"}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div>
                   <label
                     htmlFor="edit-titulo"
@@ -283,21 +573,24 @@ export default function EditarPauta() {
                 </div>
                 <div>
                   <label
-                    htmlFor="edit-status"
+                    htmlFor="edit-reporter"
                     className="block text-sm font-medium text-slate-700"
                   >
-                    Status
+                    Repórter
                   </label>
                   <select
-                    id="edit-status"
-                    name="status"
-                    value={status}
-                    onChange={(ev) => setStatus(ev.target.value)}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    id="edit-reporter"
+                    name="reporter_id"
+                    value={reporterId}
+                    onChange={(ev) => setReporterId(ev.target.value)}
+                    required
+                    disabled={reporters.length === 0}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50"
                   >
-                    {STATUS_OPTIONS.map(({ value, label }) => (
-                      <option key={value} value={value}>
-                        {label}
+                    <option value="">Selecione o repórter</option>
+                    {reporters.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.nome?.trim() || "Sem nome"}
                       </option>
                     ))}
                   </select>
@@ -321,6 +614,112 @@ export default function EditarPauta() {
                     Opcional. Se vazio, será usado 31/12 do ano atual às 18:00.
                   </p>
                 </div>
+                <div>
+                  <label
+                    htmlFor="edit-fontes"
+                    className="block text-sm font-medium text-slate-700"
+                  >
+                    Fontes e links
+                  </label>
+                  <textarea
+                    id="edit-fontes"
+                    name="fontes"
+                    value={fontes}
+                    onChange={(ev) => setFontes(ev.target.value)}
+                    rows={4}
+                    placeholder="Fontes e links"
+                    className="mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                  />
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    Arquivos de referência
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    PDF, MP3, WAV, JPG ou PNG. Os arquivos são enviados na hora para
+                    o armazenamento.
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf,.mp3,.wav,.jpg,.jpeg,.png,audio/*,image/*,application/pdf"
+                    onChange={handleFileInputChange}
+                    className="sr-only"
+                    id="arquivos-referencia-input"
+                    disabled={uploadBusy}
+                    aria-label="Selecionar arquivos de referência"
+                  />
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`mt-3 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors ${
+                      dragActive
+                        ? "border-slate-500 bg-slate-100"
+                        : "border-slate-300 bg-white"
+                    } ${uploadBusy ? "pointer-events-none opacity-60" : ""}`}
+                  >
+                    <p className="text-sm font-medium text-slate-700">
+                      Arraste arquivos aqui
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Vários arquivos de uma vez
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadBusy}
+                      className="mt-4 inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:opacity-60"
+                    >
+                      Selecionar arquivos
+                    </button>
+                  </div>
+                  {uploadBusy && (
+                    <p className="mt-2 text-center text-xs text-slate-600" role="status">
+                      Enviando…
+                    </p>
+                  )}
+                  {uploadErro && (
+                    <p className="mt-2 text-center text-sm text-red-700" role="alert">
+                      {uploadErro}
+                    </p>
+                  )}
+                  {arquivosUrls.length > 0 && (
+                    <ul className="mt-4 space-y-3">
+                      {arquivosUrls.map((u, i) => (
+                        <ArquivoReferenciaItem
+                          key={`${u}-${i}`}
+                          url={u}
+                          onRemove={() => removeArquivoAt(i)}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="edit-status"
+                    className="block text-sm font-medium text-slate-700"
+                  >
+                    Status
+                  </label>
+                  <select
+                    id="edit-status"
+                    name="status"
+                    value={status}
+                    onChange={(ev) => setStatus(ev.target.value)}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                  >
+                    {STATUS_OPTIONS.map(({ value, label }) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 {erroForm && (
                   <p className="text-sm text-red-700" role="alert">
                     {erroForm}
@@ -329,7 +728,7 @@ export default function EditarPauta() {
                 <div className="flex flex-wrap gap-3 pt-2">
                   <button
                     type="submit"
-                    disabled={salvando || reporters.length === 0}
+                    disabled={salvando || reporters.length === 0 || uploadBusy}
                     className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {salvando ? "Salvando…" : "Salvar"}
