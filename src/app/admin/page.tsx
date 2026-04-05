@@ -184,7 +184,7 @@ function AdminUsuariosPageContent() {
         <header className="mb-3 shrink-0 flex flex-col gap-3 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
-              Admin de usuários
+              Admin
             </h1>
             <p className="mt-0.5 max-w-2xl text-xs text-slate-600 sm:text-sm">
               Cadastro direto em{" "}

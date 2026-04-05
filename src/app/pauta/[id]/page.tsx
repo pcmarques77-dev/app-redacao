@@ -220,6 +220,7 @@ export default function EditarPauta() {
   const [arquivosUrls, setArquivosUrls] = useState<string[]>([]);
 
   const [salvando, setSalvando] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
   const [erroForm, setErroForm] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadErro, setUploadErro] = useState<string | null>(null);
@@ -480,6 +481,35 @@ export default function EditarPauta() {
     ]
   );
 
+  const handleExcluir = useCallback(async () => {
+    if (!id?.trim()) return;
+    if (
+      !window.confirm(
+        "Excluir esta pauta permanentemente? Esta ação não pode ser desfeita."
+      )
+    ) {
+      return;
+    }
+    setErroForm(null);
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url?.trim() || !key?.trim()) {
+      setErroForm(
+        "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no arquivo .env.local."
+      );
+      return;
+    }
+    setExcluindo(true);
+    const supabase = createBrowserClient();
+    const { error: delErr } = await supabase.from("pautas").delete().eq("id", id);
+    setExcluindo(false);
+    if (delErr) {
+      setErroForm(delErr.message || "Não foi possível excluir a pauta.");
+      return;
+    }
+    router.push("/");
+  }, [id, router]);
+
   const formularioPronto = !loading && !erroCarregamento;
 
   return (
@@ -721,7 +751,12 @@ export default function EditarPauta() {
                 <div className="flex flex-wrap gap-3 pt-2">
                   <button
                     type="submit"
-                    disabled={salvando || reporters.length === 0 || uploadBusy}
+                    disabled={
+                      salvando ||
+                      excluindo ||
+                      reporters.length === 0 ||
+                      uploadBusy
+                    }
                     className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {salvando ? "Salvando…" : "Salvar"}
@@ -732,6 +767,19 @@ export default function EditarPauta() {
                   >
                     Cancelar
                   </Link>
+                </div>
+                <div className="mt-6 border-t border-slate-200 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => void handleExcluir()}
+                    disabled={salvando || excluindo || uploadBusy}
+                    className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 shadow-sm transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {excluindo ? "Excluindo…" : "Excluir pauta"}
+                  </button>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Remove o registro do painel. Não é possível desfazer.
+                  </p>
                 </div>
               </form>
             )}

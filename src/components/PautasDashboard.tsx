@@ -9,6 +9,8 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type FormEvent,
+  type MouseEvent,
 } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
@@ -16,7 +18,12 @@ import {
   formatDeadlinePtBR,
   parseDeadlineToYmd,
 } from "@/lib/deadline-date";
-import { STATUS_OPTIONS } from "@/lib/pauta-form-options";
+import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
+
+type ModalReporterOption = {
+  id: string;
+  nome: string | null;
+};
 
 export type SortColumn =
   | "reporter"
@@ -135,6 +142,51 @@ function SortColumnHeader({
   );
 }
 
+/** Domingo (00:00 local) da semana que contém `from`. */
+function startOfWeekSunday(from: Date): Date {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+
+function addDaysLocal(from: Date, delta: number): Date {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  d.setDate(d.getDate() + delta);
+  return d;
+}
+
+function dateToYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function formatWeekRangeTitle(weekStart: Date): string {
+  const end = addDaysLocal(weekStart, 6);
+  const sameMonth =
+    weekStart.getMonth() === end.getMonth() &&
+    weekStart.getFullYear() === end.getFullYear();
+  if (sameMonth) {
+    const monthYear = weekStart.toLocaleDateString("pt-BR", {
+      month: "long",
+      year: "numeric",
+    });
+    return `${weekStart.getDate()}–${end.getDate()} de ${monthYear}`;
+  }
+  const a = weekStart.toLocaleDateString("pt-BR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  const b = end.toLocaleDateString("pt-BR", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  return `${a} – ${b}`;
+}
+
 function statusCalendarChipClass(status: string | null): string {
   const n = normalizeStatus(status);
   const base =
@@ -150,17 +202,29 @@ function statusCalendarChipClass(status: string | null): string {
 }
 
 function PautasCalendar({
+  scope,
+  onScopeChange,
   monthAnchor,
+  weekStart,
   onPrevMonth,
   onNextMonth,
+  onPrevWeek,
+  onNextWeek,
   pautasPorDia,
   onDropDeadline,
+  onDayClick,
 }: {
+  scope: "month" | "week";
+  onScopeChange: (s: "month" | "week") => void;
   monthAnchor: Date;
+  weekStart: Date;
   onPrevMonth: () => void;
   onNextMonth: () => void;
+  onPrevWeek: () => void;
+  onNextWeek: () => void;
   pautasPorDia: Map<string, PautaRow[]>;
   onDropDeadline: (pautaId: string, targetDayYmd: string) => void | Promise<void>;
+  onDayClick?: (dayYmd: string) => void;
 }) {
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
@@ -238,104 +302,221 @@ function PautasCalendar({
     setDropHighlightKey(null);
   }, []);
 
+  const renderPautaList = (dayKey: string, listClassName: string) => (
+    <ul className={listClassName}>
+      {(pautasPorDia.get(dayKey) ?? []).map((p) => (
+        <li key={p.id}>
+          <Link
+            href={`/pauta/${p.id}`}
+            data-pauta-id={p.id}
+            draggable
+            onDragStart={handleDragStartCard}
+            onDragEnd={handleDragEndCard}
+            className={`${statusCalendarChipClass(p.status)} cursor-grab active:cursor-grabbing`}
+          >
+            <span className="line-clamp-2">
+              {p.titulo_provisorio?.trim() || "Sem título"}
+            </span>
+            <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
+              {p.editoria?.trim() || "—"}
+            </span>
+            <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
+              {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+
+  const dayCellInteraction = (dayKey: string) => ({
+    onClick: onDayClick
+      ? (e: MouseEvent<HTMLDivElement>) => {
+          const t = e.target as HTMLElement;
+          if (t.closest("a[href]")) return;
+          onDayClick(dayKey);
+        }
+      : undefined,
+    onDragOver: (e: DragEvent<HTMLDivElement>) => handleDragOverDay(e, dayKey),
+    onDragEnter: (e: DragEvent<HTMLDivElement>) => handleDragEnterDay(e, dayKey),
+    onDragLeave: (e: DragEvent<HTMLDivElement>) => handleDragLeaveDay(e, dayKey),
+    onDrop: (e: DragEvent<HTMLDivElement>) => handleDropOnDay(e, dayKey),
+  });
+
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
         <button
           type="button"
-          onClick={onPrevMonth}
+          onClick={scope === "month" ? onPrevMonth : onPrevWeek}
           className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
         >
-          ← Mês anterior
+          {scope === "month" ? "← Mês anterior" : "← Semana anterior"}
         </button>
         <h2 className="text-center text-lg font-semibold capitalize text-slate-900">
-          {tituloMes}
+          {scope === "month" ? tituloMes : formatWeekRangeTitle(weekStart)}
         </h2>
         <button
           type="button"
-          onClick={onNextMonth}
+          onClick={scope === "month" ? onNextMonth : onNextWeek}
           className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
         >
-          Próximo mês →
+          {scope === "month" ? "Próximo mês →" : "Próxima semana →"}
         </button>
       </div>
-      <div className="grid grid-cols-7 gap-px border-b border-slate-200 bg-slate-200">
-        {weekLabels.map((w) => (
-          <div
-            key={w}
-            className="bg-slate-100 px-1 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600"
-          >
-            {w}
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-px bg-slate-200">
-        {cells.map((cell, idx) => {
-          const dayKey = cell.key;
-          return (
-          <div
-            key={idx}
-            className={`min-h-[7.5rem] p-1 transition-colors sm:min-h-[8.5rem] sm:p-1.5 ${
-              cell.day === null
-                ? "bg-slate-50/80"
-                : dropHighlightKey === dayKey
-                  ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400/70"
-                  : "bg-white"
+      <div className="flex flex-wrap items-center justify-center gap-2 border-b border-slate-200 bg-slate-50/90 px-4 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Período
+        </span>
+        <div
+          className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 shadow-inner"
+          role="group"
+          aria-label="Alternar entre visão mensal e semanal"
+        >
+          <button
+            type="button"
+            onClick={() => onScopeChange("month")}
+            aria-pressed={scope === "month"}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:text-sm ${
+              scope === "month"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900"
             }`}
-            onDragOver={
-              dayKey
-                ? (e) => handleDragOverDay(e, dayKey)
-                : undefined
-            }
-            onDragEnter={
-              dayKey
-                ? (e) => handleDragEnterDay(e, dayKey)
-                : undefined
-            }
-            onDragLeave={
-              dayKey
-                ? (e) => handleDragLeaveDay(e, dayKey)
-                : undefined
-            }
-            onDrop={
-              dayKey ? (e) => handleDropOnDay(e, dayKey) : undefined
-            }
           >
-            {cell.day !== null && dayKey !== null && (
-              <>
-                <div className="mb-1 text-right text-xs font-semibold tabular-nums text-slate-500">
-                  {cell.day}
-                </div>
-                <ul className="max-h-[5.5rem] space-y-1 overflow-y-auto sm:max-h-[6.5rem]">
-                  {(pautasPorDia.get(dayKey) ?? []).map((p) => (
-                    <li key={p.id}>
-                      <Link
-                        href={`/pauta/${p.id}`}
-                        data-pauta-id={p.id}
-                        draggable
-                        onDragStart={handleDragStartCard}
-                        onDragEnd={handleDragEndCard}
-                        className={`${statusCalendarChipClass(p.status)} cursor-grab active:cursor-grabbing`}
-                      >
-                        <span className="line-clamp-2">
-                          {p.titulo_provisorio?.trim() || "Sem título"}
-                        </span>
-                        <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
-                          {p.editoria?.trim() || "—"}
-                        </span>
-                        <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
-                          {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
-                        </span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </div>
-          );
-        })}
+            Mês
+          </button>
+          <button
+            type="button"
+            onClick={() => onScopeChange("week")}
+            aria-pressed={scope === "week"}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:text-sm ${
+              scope === "week"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            Semana
+          </button>
+        </div>
       </div>
+
+      {scope === "month" ? (
+        <>
+          <div className="grid grid-cols-7 gap-px border-b border-slate-200 bg-slate-200">
+            {weekLabels.map((w) => (
+              <div
+                key={w}
+                className="bg-slate-100 px-1 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-600"
+              >
+                {w}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-px bg-slate-200">
+            {cells.map((cell, idx) => {
+              const dayKey = cell.key;
+              return (
+                <div
+                  key={idx}
+                  className={`min-h-[7.5rem] p-1 transition-colors sm:min-h-[8.5rem] sm:p-1.5 ${
+                    cell.day === null
+                      ? "bg-slate-50/80"
+                      : dropHighlightKey === dayKey
+                        ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400/70"
+                        : "bg-white"
+                  }${dayKey && onDayClick ? " cursor-pointer" : ""}`}
+                  onClick={
+                    dayKey && onDayClick
+                      ? (e) => {
+                          const t = e.target as HTMLElement;
+                          if (t.closest("a[href]")) return;
+                          onDayClick(dayKey);
+                        }
+                      : undefined
+                  }
+                  onDragOver={
+                    dayKey
+                      ? (e) => handleDragOverDay(e, dayKey)
+                      : undefined
+                  }
+                  onDragEnter={
+                    dayKey
+                      ? (e) => handleDragEnterDay(e, dayKey)
+                      : undefined
+                  }
+                  onDragLeave={
+                    dayKey
+                      ? (e) => handleDragLeaveDay(e, dayKey)
+                      : undefined
+                  }
+                  onDrop={
+                    dayKey ? (e) => handleDropOnDay(e, dayKey) : undefined
+                  }
+                >
+                  {cell.day !== null && dayKey !== null && (
+                    <>
+                      <div className="mb-1 text-right text-xs font-semibold tabular-nums text-slate-500">
+                        {cell.day}
+                      </div>
+                      {renderPautaList(
+                        dayKey,
+                        "max-h-[5.5rem] space-y-1 overflow-y-auto sm:max-h-[6.5rem]"
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-7 gap-px border-b border-slate-200 bg-slate-200">
+            {Array.from({ length: 7 }, (_, i) => {
+              const d = addDaysLocal(weekStart, i);
+              const ymd = dateToYmd(d);
+              return (
+                <div
+                  key={ymd}
+                  className="bg-slate-100 px-1 py-2 text-center text-slate-600"
+                >
+                  <div className="text-xs font-semibold uppercase tracking-wide">
+                    {weekLabels[d.getDay()]}
+                  </div>
+                  <div className="mt-0.5 text-[11px] font-medium capitalize tabular-nums text-slate-700 sm:text-xs">
+                    {d.toLocaleDateString("pt-BR", {
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-7 gap-px bg-slate-200">
+            {Array.from({ length: 7 }, (_, i) => {
+              const dayKey = dateToYmd(addDaysLocal(weekStart, i));
+              const inter = dayCellInteraction(dayKey);
+              return (
+                <div
+                  key={dayKey}
+                  className={`min-h-[10rem] p-1.5 transition-colors sm:min-h-[12rem] sm:p-2 ${
+                    dropHighlightKey === dayKey
+                      ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400/70"
+                      : "bg-white"
+                  }${onDayClick ? " cursor-pointer" : ""}`}
+                  {...inter}
+                >
+                  {renderPautaList(
+                    dayKey,
+                    "max-h-[min(24rem,calc(100vh-18rem))] space-y-1 overflow-y-auto sm:max-h-[min(28rem,calc(100vh-16rem))]"
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -428,11 +609,36 @@ export function PautasDashboard() {
   const [excluindo, setExcluindo] = useState(false);
   const [feedbackErro, setFeedbackErro] = useState<string | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
-  const [viewMode, setViewMode] = useState<"lista" | "calendario">("lista");
+  const [viewMode, setViewMode] = useState<"lista" | "calendario">("calendario");
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
+  const [calendarScope, setCalendarScope] = useState<"month" | "week">("month");
+  const [calendarWeekStart, setCalendarWeekStart] = useState(() =>
+    startOfWeekSunday(new Date())
+  );
+
+  const handleCalendarScopeChange = useCallback((s: "month" | "week") => {
+    setCalendarScope(s);
+    if (s === "week") {
+      setCalendarWeekStart(startOfWeekSunday(new Date()));
+    } else {
+      const d = new Date();
+      setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+    }
+  }, []);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [modalTitulo, setModalTitulo] = useState("");
+  const [modalResumo, setModalResumo] = useState("");
+  const [modalSaving, setModalSaving] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [modalReporters, setModalReporters] = useState<ModalReporterOption[]>([]);
+  const [modalReportersLoading, setModalReportersLoading] = useState(false);
+  const [modalReportersError, setModalReportersError] = useState<string | null>(null);
+  const [modalReporterId, setModalReporterId] = useState("");
+  const [modalEditoria, setModalEditoria] = useState("Últimas Notícias");
 
   const opcoesReporters = useMemo(() => {
     const set = new Set<string>();
@@ -559,6 +765,40 @@ export function PautasDashboard() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    let cancelled = false;
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url?.trim() || !key?.trim()) {
+      setModalReportersError(
+        "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no arquivo .env.local."
+      );
+      setModalReportersLoading(false);
+      return;
+    }
+    setModalReportersLoading(true);
+    setModalReportersError(null);
+    const supabase = createBrowserClient();
+    void (async () => {
+      const { data, error: qErr } = await supabase
+        .from("usuarios")
+        .select("id, nome")
+        .order("nome", { ascending: true });
+      if (cancelled) return;
+      setModalReportersLoading(false);
+      if (qErr) {
+        setModalReportersError(qErr.message || "Não foi possível carregar os repórteres.");
+        setModalReporters([]);
+        return;
+      }
+      setModalReporters((data as ModalReporterOption[]) ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isModalOpen]);
 
   const todosVisiveisSelecionados =
     idsVisiveis.length > 0 && idsVisiveis.every((id) => selecionadas.includes(id));
@@ -714,6 +954,79 @@ export function PautasDashboard() {
     [pautas]
   );
 
+  const closeNovaPautaModal = useCallback(() => {
+    setIsModalOpen(false);
+    setSelectedDate(null);
+    setModalTitulo("");
+    setModalResumo("");
+    setModalReporterId("");
+    setModalEditoria("Últimas Notícias");
+    setModalSaving(false);
+    setModalError(null);
+    setModalReportersError(null);
+  }, []);
+
+  const handleCalendarDayClick = useCallback((ymd: string) => {
+    setSelectedDate(ymd);
+    setModalTitulo("");
+    setModalResumo("");
+    setModalReporterId("");
+    setModalEditoria("Últimas Notícias");
+    setModalError(null);
+    setModalReportersError(null);
+    setIsModalOpen(true);
+  }, []);
+
+  const handleSubmitNovaPautaModal = useCallback(
+    async (e: FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      if (!selectedDate) return;
+      const titulo = modalTitulo.trim();
+      if (!titulo) {
+        setModalError("Informe o título.");
+        return;
+      }
+      if (!modalReporterId.trim()) {
+        setModalError("Selecione um repórter.");
+        return;
+      }
+      setModalError(null);
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!url?.trim() || !key?.trim()) {
+        setModalError("Configure as variáveis de ambiente do Supabase.");
+        return;
+      }
+      setModalSaving(true);
+      const supabase = createBrowserClient();
+      const { error: insertErr } = await supabase.from("pautas").insert({
+        titulo_provisorio: titulo,
+        fontes: modalResumo.trim() || null,
+        deadline: selectedDate,
+        reporter_id: modalReporterId.trim(),
+        editoria: modalEditoria,
+        status: "Sugerida",
+        arquivos_urls: [],
+      });
+      setModalSaving(false);
+      if (insertErr) {
+        setModalError(insertErr.message || "Não foi possível salvar a pauta.");
+        return;
+      }
+      closeNovaPautaModal();
+      void load();
+    },
+    [
+      closeNovaPautaModal,
+      load,
+      modalEditoria,
+      modalReporterId,
+      modalResumo,
+      modalTitulo,
+      selectedDate,
+    ]
+  );
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
       <header className="mb-10 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
@@ -741,7 +1054,7 @@ export function PautasDashboard() {
             href="/admin"
             className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
-            Admin de Usuários
+            Admin
           </Link>
           <button
             type="button"
@@ -885,34 +1198,8 @@ export function PautasDashboard() {
                 <div
                   className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 shadow-inner"
                   role="group"
-                  aria-label="Alternar entre lista e calendário"
+                  aria-label="Alternar entre calendário e lista"
                 >
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("lista")}
-                    aria-pressed={viewMode === "lista"}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                      viewMode === "lista"
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <svg
-                      className="h-4 w-4 shrink-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={1.5}
-                      stroke="currentColor"
-                      aria-hidden
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-                      />
-                    </svg>
-                    Lista
-                  </button>
                   <button
                     type="button"
                     onClick={() => setViewMode("calendario")}
@@ -938,6 +1225,32 @@ export function PautasDashboard() {
                       />
                     </svg>
                     Calendário
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("lista")}
+                    aria-pressed={viewMode === "lista"}
+                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      viewMode === "lista"
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    <svg
+                      className="h-4 w-4 shrink-0"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.5}
+                      stroke="currentColor"
+                      aria-hidden
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
+                      />
+                    </svg>
+                    Lista
                   </button>
                 </div>
               </div>
@@ -1161,7 +1474,10 @@ export function PautasDashboard() {
 
           {viewMode === "calendario" && (
             <PautasCalendar
+              scope={calendarScope}
+              onScopeChange={handleCalendarScopeChange}
               monthAnchor={calendarMonth}
+              weekStart={calendarWeekStart}
               onPrevMonth={() =>
                 setCalendarMonth(
                   (d) => new Date(d.getFullYear(), d.getMonth() - 1, 1)
@@ -1172,13 +1488,199 @@ export function PautasDashboard() {
                   (d) => new Date(d.getFullYear(), d.getMonth() + 1, 1)
                 )
               }
+              onPrevWeek={() =>
+                setCalendarWeekStart((d) => addDaysLocal(d, -7))
+              }
+              onNextWeek={() =>
+                setCalendarWeekStart((d) => addDaysLocal(d, 7))
+              }
               pautasPorDia={pautasPorDia}
               onDropDeadline={handleCalendarDeadlineDrop}
+              onDayClick={handleCalendarDayClick}
             />
           )}
             </>
           )}
         </>
+      )}
+
+      {isModalOpen && selectedDate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !modalSaving) closeNovaPautaModal();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="nova-pauta-modal-title"
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2
+                id="nova-pauta-modal-title"
+                className="text-lg font-semibold text-slate-900"
+              >
+                Nova pauta
+              </h2>
+              <button
+                type="button"
+                onClick={() => !modalSaving && closeNovaPautaModal()}
+                className="shrink-0 rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:opacity-50"
+                aria-label="Fechar"
+                disabled={modalSaving}
+              >
+                ×
+              </button>
+            </div>
+            <p className="mt-1 text-sm text-slate-600">
+              Prazo:{" "}
+              <span className="font-medium text-slate-800">
+                {formatDeadlinePtBR(selectedDate)}
+              </span>
+            </p>
+            <form
+              className="mt-4 space-y-4"
+              onSubmit={(e) => void handleSubmitNovaPautaModal(e)}
+            >
+              {modalError && (
+                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                  {modalError}
+                </p>
+              )}
+              <div>
+                <label
+                  htmlFor="modal-pauta-titulo"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Título
+                </label>
+                <input
+                  id="modal-pauta-titulo"
+                  type="text"
+                  value={modalTitulo}
+                  onChange={(e) => setModalTitulo(e.target.value)}
+                  disabled={modalSaving}
+                  autoFocus
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+                  placeholder="Título provisório"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="modal-pauta-resumo"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Resumo
+                </label>
+                <textarea
+                  id="modal-pauta-resumo"
+                  value={modalResumo}
+                  onChange={(e) => setModalResumo(e.target.value)}
+                  disabled={modalSaving}
+                  rows={3}
+                  className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+                  placeholder="Resumo ou notas rápidas"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="modal-pauta-reporter"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Repórter
+                </label>
+                {modalReportersLoading && (
+                  <p className="mt-1 text-xs text-slate-500" role="status">
+                    Carregando repórteres…
+                  </p>
+                )}
+                {modalReportersError && !modalReportersLoading && (
+                  <p className="mt-1 text-xs text-red-700">{modalReportersError}</p>
+                )}
+                <select
+                  id="modal-pauta-reporter"
+                  value={modalReporterId}
+                  onChange={(e) => setModalReporterId(e.target.value)}
+                  disabled={modalSaving || modalReportersLoading || modalReporters.length === 0}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                >
+                  <option value="">Selecione…</option>
+                  {modalReporters.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.nome?.trim() || "Sem nome"}
+                    </option>
+                  ))}
+                </select>
+                {!modalReportersLoading &&
+                  !modalReportersError &&
+                  modalReporters.length === 0 && (
+                    <p className="mt-1 text-xs text-amber-800">
+                      Nenhum usuário cadastrado. Use o Admin.
+                    </p>
+                  )}
+              </div>
+              <div>
+                <label
+                  htmlFor="modal-pauta-editoria"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Editoria
+                </label>
+                <select
+                  id="modal-pauta-editoria"
+                  value={modalEditoria}
+                  onChange={(e) => setModalEditoria(e.target.value)}
+                  disabled={modalSaving}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                >
+                  {EDITORIA_OPTIONS.map((ed) => (
+                    <option key={ed} value={ed}>
+                      {ed}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label
+                  htmlFor="modal-pauta-data"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Data (prazo)
+                </label>
+                <input
+                  id="modal-pauta-data"
+                  type="date"
+                  value={selectedDate}
+                  readOnly
+                  disabled
+                  aria-readonly="true"
+                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-700"
+                />
+              </div>
+              <div className="flex flex-wrap justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => !modalSaving && closeNovaPautaModal()}
+                  disabled={modalSaving}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:opacity-60"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={modalSaving}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-60"
+                >
+                  {modalSaving ? "Salvando…" : "Salvar"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
