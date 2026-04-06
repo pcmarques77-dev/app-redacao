@@ -1254,7 +1254,7 @@ export function PautasDashboard() {
             className="inline-block cursor-pointer rounded-sm text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-slate-700 sm:text-3xl">
-              Pautas Viva
+            {process.env.NEXT_PUBLIC_TITULO_DASHBOARD || "Painel de Pautas"}
             </h1>
           </Link>
           <p className="mt-2 text-sm text-slate-600">
