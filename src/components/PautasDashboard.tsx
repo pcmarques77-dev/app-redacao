@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -19,21 +18,25 @@ import {
   parseDeadlineToYmd,
 } from "@/lib/deadline-date";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
+import {
+  EscalaForm,
+  type EscalaInitialValues,
+} from "@/components/EscalaForm";
 
 type ModalReporterOption = {
   id: string;
   nome: string | null;
 };
 
-export type SortColumn =
+type SortColumn =
   | "reporter"
   | "titulo"
   | "editoria"
   | "prazo"
   | "status";
-export type SortDirection = "asc" | "desc";
+type SortDirection = "asc" | "desc";
 
-export type PautaRow = {
+type PautaRow = {
   id: string;
   titulo_provisorio: string | null;
   editoria: string | null;
@@ -41,6 +44,52 @@ export type PautaRow = {
   status: string | null;
   reporter: { nome: string | null } | null;
 };
+
+type EscalaRow = {
+  id: string;
+  tipo: string | null;
+  usuario_id: string | null;
+  data_inicio: string | null;
+  data_fim: string | null;
+  coordenador: string | null;
+  horario: string | null;
+  usuarios: { nome: string | null } | null;
+};
+
+function escalaUsuarioNome(e: EscalaRow): string {
+  return e.usuarios?.nome?.trim() || "—";
+}
+
+function normalizeEscalaTipo(t: string | null): string {
+  return (t ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+}
+
+function isPlantaoTipo(t: string | null): boolean {
+  return normalizeEscalaTipo(t) === "plantao";
+}
+
+function isFeriasTipo(t: string | null): boolean {
+  return normalizeEscalaTipo(t) === "ferias";
+}
+
+function isCoordenacaoTipo(t: string | null): boolean {
+  return normalizeEscalaTipo(t) === "coordenacao";
+}
+
+function dayYmdInFeriasRange(
+  dayYmd: string,
+  start: string | null,
+  end: string | null
+): boolean {
+  const a = start?.trim() ?? "";
+  const b = end?.trim() ?? "";
+  if (!a || !b) return false;
+  return dayYmd >= a && dayYmd <= b;
+}
 
 function reporterNome(p: PautaRow): string {
   return p.reporter?.nome?.trim() || "—";
@@ -211,8 +260,10 @@ function PautasCalendar({
   onPrevWeek,
   onNextWeek,
   pautasPorDia,
+  escalas,
   onDropDeadline,
   onDayClick,
+  onEscalaCardClick,
 }: {
   scope: "month" | "week";
   onScopeChange: (s: "month" | "week") => void;
@@ -223,8 +274,10 @@ function PautasCalendar({
   onPrevWeek: () => void;
   onNextWeek: () => void;
   pautasPorDia: Map<string, PautaRow[]>;
+  escalas: EscalaRow[];
   onDropDeadline: (pautaId: string, targetDayYmd: string) => void | Promise<void>;
   onDayClick?: (dayYmd: string) => void;
+  onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
 }) {
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
@@ -302,6 +355,89 @@ function PautasCalendar({
     setDropHighlightKey(null);
   }, []);
 
+  const renderCoordenacaoNoDia = (dayKey: string) => {
+    const rows = escalas.filter(
+      (e) => isCoordenacaoTipo(e.tipo) && e.data_inicio?.trim() === dayKey
+    );
+    if (rows.length === 0) return null;
+    return (
+      <div className="mt-1 space-y-1">
+        {rows.map((e) => (
+          <button
+            key={`escala-coord-${e.id}`}
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onEscalaCardClick?.(e, dayKey);
+            }}
+            className="block w-full cursor-pointer rounded border border-violet-400/70 bg-violet-100 px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-violet-950 shadow-sm transition hover:ring-2 hover:ring-violet-400/50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-violet-500"
+          >
+            <span className="line-clamp-2 font-semibold">
+              👑 Coordenação: {escalaUsuarioNome(e)}
+            </span>
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const renderPlantoesNoDia = (dayKey: string) => {
+    const plantoes = escalas.filter(
+      (e) => isPlantaoTipo(e.tipo) && e.data_inicio?.trim() === dayKey
+    );
+    if (plantoes.length === 0) return null;
+    return (
+      <div className="mt-1 space-y-1">
+        {plantoes.map((e) => (
+          <button
+            key={`escala-plantao-${e.id}`}
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onEscalaCardClick?.(e, dayKey);
+            }}
+            className="block w-full cursor-pointer rounded border border-slate-700/35 bg-slate-800 px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-amber-50 shadow-sm transition hover:ring-2 hover:ring-amber-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-amber-400"
+          >
+            <span className="line-clamp-2 font-semibold">
+              Plantão: {escalaUsuarioNome(e)}
+            </span>
+            {e.horario?.trim() && (
+              <span className="mt-0.5 block truncate text-[9px] font-normal tabular-nums opacity-85">
+                {e.horario.trim()}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const renderFeriasNoDia = (dayKey: string) => {
+    const feriasNoDia = escalas.filter(
+      (e) =>
+        isFeriasTipo(e.tipo) &&
+        dayYmdInFeriasRange(dayKey, e.data_inicio, e.data_fim)
+    );
+    if (feriasNoDia.length === 0) return null;
+    return (
+      <div className="mt-1 space-y-1">
+        {feriasNoDia.map((e) => (
+          <button
+            key={`escala-ferias-${e.id}`}
+            type="button"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onEscalaCardClick?.(e, dayKey);
+            }}
+            className="block w-full cursor-pointer rounded border border-dashed border-emerald-600/45 bg-emerald-50/95 px-1.5 py-0.5 text-left text-[10px] leading-snug text-emerald-900 transition hover:bg-emerald-100/95 focus-visible:outline focus-visible:ring-2 focus-visible:ring-emerald-500"
+          >
+            ✈️ Férias: {escalaUsuarioNome(e)}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   const renderPautaList = (dayKey: string, listClassName: string) => (
     <ul className={listClassName}>
       {(pautasPorDia.get(dayKey) ?? []).map((p) => (
@@ -329,19 +465,27 @@ function PautasCalendar({
     </ul>
   );
 
-  const dayCellInteraction = (dayKey: string) => ({
-    onClick: onDayClick
-      ? (e: MouseEvent<HTMLDivElement>) => {
-          const t = e.target as HTMLElement;
-          if (t.closest("a[href]")) return;
-          onDayClick(dayKey);
-        }
-      : undefined,
-    onDragOver: (e: DragEvent<HTMLDivElement>) => handleDragOverDay(e, dayKey),
-    onDragEnter: (e: DragEvent<HTMLDivElement>) => handleDragEnterDay(e, dayKey),
-    onDragLeave: (e: DragEvent<HTMLDivElement>) => handleDragLeaveDay(e, dayKey),
-    onDrop: (e: DragEvent<HTMLDivElement>) => handleDropOnDay(e, dayKey),
-  });
+  const dayCellHandlers = (dayKey: string | null) => {
+    if (!dayKey) {
+      return {};
+    }
+    return {
+      onClick: onDayClick
+        ? (e: MouseEvent<HTMLDivElement>) => {
+            const t = e.target as HTMLElement;
+            if (t.closest("a[href]")) return;
+            onDayClick(dayKey);
+          }
+        : undefined,
+      onDragOver: (e: DragEvent<HTMLDivElement>) =>
+        handleDragOverDay(e, dayKey),
+      onDragEnter: (e: DragEvent<HTMLDivElement>) =>
+        handleDragEnterDay(e, dayKey),
+      onDragLeave: (e: DragEvent<HTMLDivElement>) =>
+        handleDragLeaveDay(e, dayKey),
+      onDrop: (e: DragEvent<HTMLDivElement>) => handleDropOnDay(e, dayKey),
+    };
+  };
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -425,33 +569,7 @@ function PautasCalendar({
                         ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400/70"
                         : "bg-white"
                   }${dayKey && onDayClick ? " cursor-pointer" : ""}`}
-                  onClick={
-                    dayKey && onDayClick
-                      ? (e) => {
-                          const t = e.target as HTMLElement;
-                          if (t.closest("a[href]")) return;
-                          onDayClick(dayKey);
-                        }
-                      : undefined
-                  }
-                  onDragOver={
-                    dayKey
-                      ? (e) => handleDragOverDay(e, dayKey)
-                      : undefined
-                  }
-                  onDragEnter={
-                    dayKey
-                      ? (e) => handleDragEnterDay(e, dayKey)
-                      : undefined
-                  }
-                  onDragLeave={
-                    dayKey
-                      ? (e) => handleDragLeaveDay(e, dayKey)
-                      : undefined
-                  }
-                  onDrop={
-                    dayKey ? (e) => handleDropOnDay(e, dayKey) : undefined
-                  }
+                  {...dayCellHandlers(dayKey)}
                 >
                   {cell.day !== null && dayKey !== null && (
                     <>
@@ -462,6 +580,9 @@ function PautasCalendar({
                         dayKey,
                         "max-h-[5.5rem] space-y-1 overflow-y-auto sm:max-h-[6.5rem]"
                       )}
+                      {renderCoordenacaoNoDia(dayKey)}
+                      {renderPlantoesNoDia(dayKey)}
+                      {renderFeriasNoDia(dayKey)}
                     </>
                   )}
                 </div>
@@ -496,7 +617,6 @@ function PautasCalendar({
           <div className="grid grid-cols-7 gap-px bg-slate-200">
             {Array.from({ length: 7 }, (_, i) => {
               const dayKey = dateToYmd(addDaysLocal(weekStart, i));
-              const inter = dayCellInteraction(dayKey);
               return (
                 <div
                   key={dayKey}
@@ -505,12 +625,15 @@ function PautasCalendar({
                       ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400/70"
                       : "bg-white"
                   }${onDayClick ? " cursor-pointer" : ""}`}
-                  {...inter}
+                  {...dayCellHandlers(dayKey)}
                 >
                   {renderPautaList(
                     dayKey,
                     "max-h-[min(24rem,calc(100vh-18rem))] space-y-1 overflow-y-auto sm:max-h-[min(28rem,calc(100vh-16rem))]"
                   )}
+                  {renderCoordenacaoNoDia(dayKey)}
+                  {renderPlantoesNoDia(dayKey)}
+                  {renderFeriasNoDia(dayKey)}
                 </div>
               );
             })}
@@ -595,8 +718,8 @@ function StatusInlineSelect({
 }
 
 export function PautasDashboard() {
-  const router = useRouter();
   const [pautas, setPautas] = useState<PautaRow[]>([]);
+  const [escalas, setEscalas] = useState<EscalaRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<SortColumn>("prazo");
@@ -639,6 +762,22 @@ export function PautasDashboard() {
   const [modalReportersError, setModalReportersError] = useState<string | null>(null);
   const [modalReporterId, setModalReporterId] = useState("");
   const [modalEditoria, setModalEditoria] = useState("Últimas Notícias");
+  const [modalTab, setModalTab] = useState<"pauta" | "escala">("pauta");
+  const [escalaFormDirty, setEscalaFormDirty] = useState(false);
+  const [escalaSaving, setEscalaSaving] = useState(false);
+  const [editingEscala, setEditingEscala] = useState<EscalaRow | null>(null);
+
+  const escalaFormInitial = useMemo((): EscalaInitialValues | undefined => {
+    if (!editingEscala?.usuario_id?.trim()) return undefined;
+    return {
+      id: editingEscala.id,
+      tipo: editingEscala.tipo,
+      usuario_id: editingEscala.usuario_id.trim(),
+      data_inicio: editingEscala.data_inicio,
+      data_fim: editingEscala.data_fim,
+      horario: editingEscala.horario,
+    };
+  }, [editingEscala]);
 
   const opcoesReporters = useMemo(() => {
     const set = new Set<string>();
@@ -739,10 +878,11 @@ export function PautasDashboard() {
       return;
     }
     const supabase = createBrowserClient();
-    const { data, error: qErr } = await supabase
-      .from("pautas")
-      .select(
-        `
+    const [pRes, eRes] = await Promise.all([
+      supabase
+        .from("pautas")
+        .select(
+          `
         id,
         titulo_provisorio,
         editoria,
@@ -750,14 +890,36 @@ export function PautasDashboard() {
         status,
         reporter:usuarios!pautas_reporter_id_fkey(nome)
       `
-      )
-      .order("deadline", { ascending: true, nullsFirst: false });
+        )
+        .order("deadline", { ascending: true, nullsFirst: false }),
+      supabase
+        .from("escalas")
+        .select(
+          `
+        id,
+        tipo,
+        usuario_id,
+        data_inicio,
+        data_fim,
+        coordenador,
+        horario,
+        usuarios ( nome )
+      `
+        )
+        .order("data_inicio", { ascending: true }),
+    ]);
 
-    if (qErr) {
-      setError(qErr.message || "Não foi possível carregar as pautas.");
+    if (pRes.error) {
+      setError(pRes.error.message || "Não foi possível carregar as pautas.");
       setPautas([]);
+      setEscalas([]);
     } else {
-      setPautas((data ?? []) as unknown as PautaRow[]);
+      setPautas((pRes.data ?? []) as unknown as PautaRow[]);
+      if (eRes.error) {
+        setEscalas([]);
+      } else {
+        setEscalas((eRes.data ?? []) as unknown as EscalaRow[]);
+      }
     }
     setLoading(false);
   }, []);
@@ -916,13 +1078,6 @@ export function PautasDashboard() {
     [pautas]
   );
 
-  const handleLogout = useCallback(async () => {
-    const supabase = createBrowserClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }, [router]);
-
   const handleCalendarDeadlineDrop = useCallback(
     async (pautaId: string, targetYmd: string) => {
       setFeedbackErro(null);
@@ -964,18 +1119,81 @@ export function PautasDashboard() {
     setModalSaving(false);
     setModalError(null);
     setModalReportersError(null);
+    setModalTab("pauta");
+    setEscalaFormDirty(false);
+    setEscalaSaving(false);
+    setEditingEscala(null);
   }, []);
+
+  const requestCloseDayModal = useCallback(() => {
+    if (modalSaving || escalaSaving) return;
+    const pautaDirty =
+      modalTitulo.trim() !== "" ||
+      modalResumo.trim() !== "" ||
+      modalReporterId.trim() !== "";
+    if (pautaDirty || escalaFormDirty) {
+      if (
+        !window.confirm(
+          "Você tem dados não salvos. Deseja realmente sair?"
+        )
+      ) {
+        return;
+      }
+    }
+    closeNovaPautaModal();
+  }, [
+    modalSaving,
+    escalaSaving,
+    modalTitulo,
+    modalResumo,
+    modalReporterId,
+    escalaFormDirty,
+    closeNovaPautaModal,
+  ]);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      requestCloseDayModal();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [isModalOpen, requestCloseDayModal]);
 
   const handleCalendarDayClick = useCallback((ymd: string) => {
     setSelectedDate(ymd);
+    setEditingEscala(null);
     setModalTitulo("");
     setModalResumo("");
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
     setModalError(null);
     setModalReportersError(null);
+    setModalTab("pauta");
+    setEscalaFormDirty(false);
+    setEscalaSaving(false);
     setIsModalOpen(true);
   }, []);
+
+  const handleEscalaCardClick = useCallback(
+    (row: EscalaRow, dayYmd: string) => {
+      setSelectedDate(dayYmd);
+      setEditingEscala(row);
+      setModalTitulo("");
+      setModalResumo("");
+      setModalReporterId("");
+      setModalEditoria("Últimas Notícias");
+      setModalError(null);
+      setModalReportersError(null);
+      setModalTab("escala");
+      setEscalaFormDirty(false);
+      setEscalaSaving(false);
+      setIsModalOpen(true);
+    },
+    []
+  );
 
   const handleSubmitNovaPautaModal = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
@@ -1045,41 +1263,23 @@ export function PautasDashboard() {
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           <Link
+            href="/admin"
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+          >
+            Admin
+          </Link>
+          <Link
             href="/radar-pautas"
             className="inline-flex items-center justify-center rounded-md border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-medium text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
           >
             Radar de Pautas
           </Link>
           <Link
-            href="/admin"
-            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            href="/escala"
+            className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
           >
-            Admin
+            Escala
           </Link>
-          <button
-            type="button"
-            onClick={() => void handleLogout()}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-            aria-label="Sair da conta"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" x2="9" y1="12" y2="12" />
-            </svg>
-            Sair
-          </button>
           <Link
             href="/nova-pauta"
             className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
@@ -1116,13 +1316,7 @@ export function PautasDashboard() {
         </div>
       )}
 
-      {!loading && !error && pautas.length === 0 && (
-        <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-14 text-center text-slate-500">
-          Nenhuma pauta encontrada.
-        </div>
-      )}
-
-      {!loading && !error && pautas.length > 0 && (
+      {!loading && !error && (
         <>
           {feedbackErro && (
             <div
@@ -1270,15 +1464,17 @@ export function PautasDashboard() {
             </div>
           )}
 
-          {sortedPautas.length === 0 && (
+          {viewMode === "lista" && sortedPautas.length === 0 && (
             <div className="mb-6 rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center text-slate-500">
-              Nenhuma pauta corresponde aos filtros selecionados.
+              {pautas.length === 0
+                ? "Nenhuma pauta encontrada."
+                : "Nenhuma pauta corresponde aos filtros selecionados."}
             </div>
           )}
 
-          {sortedPautas.length > 0 && (
+          {(viewMode === "calendario" || sortedPautas.length > 0) && (
             <>
-          {viewMode === "lista" && (
+          {viewMode === "lista" && sortedPautas.length > 0 && (
           <>
           <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
             <div className="overflow-x-auto">
@@ -1495,8 +1691,10 @@ export function PautasDashboard() {
                 setCalendarWeekStart((d) => addDaysLocal(d, 7))
               }
               pautasPorDia={pautasPorDia}
+              escalas={escalas}
               onDropDeadline={handleCalendarDeadlineDrop}
               onDayClick={handleCalendarDayClick}
+              onEscalaCardClick={handleEscalaCardClick}
             />
           )}
             </>
@@ -1509,176 +1707,273 @@ export function PautasDashboard() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           role="presentation"
           onClick={(e) => {
-            if (e.target === e.currentTarget && !modalSaving) closeNovaPautaModal();
+            if (
+              e.target === e.currentTarget &&
+              !modalSaving &&
+              !escalaSaving
+            ) {
+              requestCloseDayModal();
+            }
           }}
         >
           <div
             role="dialog"
             aria-modal="true"
-            aria-labelledby="nova-pauta-modal-title"
+            aria-labelledby="calendar-day-modal-title"
             className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
               <h2
-                id="nova-pauta-modal-title"
+                id="calendar-day-modal-title"
                 className="text-lg font-semibold text-slate-900"
               >
-                Nova pauta
+                {formatDeadlinePtBR(selectedDate)}
               </h2>
               <button
                 type="button"
-                onClick={() => !modalSaving && closeNovaPautaModal()}
-                className="shrink-0 rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:opacity-50"
+                onClick={() => requestCloseDayModal()}
+                className="shrink-0 rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="Fechar"
-                disabled={modalSaving}
+                disabled={modalSaving || escalaSaving}
               >
                 ×
               </button>
             </div>
-            <p className="mt-1 text-sm text-slate-600">
-              Prazo:{" "}
-              <span className="font-medium text-slate-800">
-                {formatDeadlinePtBR(selectedDate)}
-              </span>
-            </p>
-            <form
-              className="mt-4 space-y-4"
-              onSubmit={(e) => void handleSubmitNovaPautaModal(e)}
+
+            <div
+              className="mt-4 flex gap-1 border-b border-slate-200"
+              role="tablist"
+              aria-label="Tipo de cadastro"
             >
-              {modalError && (
-                <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-                  {modalError}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={modalTab === "pauta"}
+                onClick={() => setModalTab("pauta")}
+                disabled={modalSaving || escalaSaving}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  modalTab === "pauta"
+                    ? "border-blue-600 font-semibold text-slate-900"
+                    : "border-transparent font-medium text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Nova Pauta
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={modalTab === "escala"}
+                onClick={() => setModalTab("escala")}
+                disabled={modalSaving || escalaSaving}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  modalTab === "escala"
+                    ? "border-blue-600 font-semibold text-slate-900"
+                    : "border-transparent font-medium text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Escala
+              </button>
+            </div>
+
+            {modalTab === "pauta" && (
+              <>
+                <p className="mt-3 text-sm text-slate-600">
+                  Prazo:{" "}
+                  <span className="font-medium text-slate-800">
+                    {formatDeadlinePtBR(selectedDate)}
+                  </span>
                 </p>
-              )}
-              <div>
-                <label
-                  htmlFor="modal-pauta-titulo"
-                  className="block text-sm font-medium text-slate-700"
+                <form
+                  className="mt-4 space-y-4"
+                  onSubmit={(e) => void handleSubmitNovaPautaModal(e)}
                 >
-                  Título
-                </label>
-                <input
-                  id="modal-pauta-titulo"
-                  type="text"
-                  value={modalTitulo}
-                  onChange={(e) => setModalTitulo(e.target.value)}
-                  disabled={modalSaving}
-                  autoFocus
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
-                  placeholder="Título provisório"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="modal-pauta-resumo"
-                  className="block text-sm font-medium text-slate-700"
-                >
-                  Resumo
-                </label>
-                <textarea
-                  id="modal-pauta-resumo"
-                  value={modalResumo}
-                  onChange={(e) => setModalResumo(e.target.value)}
-                  disabled={modalSaving}
-                  rows={3}
-                  className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
-                  placeholder="Resumo ou notas rápidas"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="modal-pauta-reporter"
-                  className="block text-sm font-medium text-slate-700"
-                >
-                  Repórter
-                </label>
-                {modalReportersLoading && (
-                  <p className="mt-1 text-xs text-slate-500" role="status">
-                    Carregando repórteres…
-                  </p>
-                )}
-                {modalReportersError && !modalReportersLoading && (
-                  <p className="mt-1 text-xs text-red-700">{modalReportersError}</p>
-                )}
-                <select
-                  id="modal-pauta-reporter"
-                  value={modalReporterId}
-                  onChange={(e) => setModalReporterId(e.target.value)}
-                  disabled={modalSaving || modalReportersLoading || modalReporters.length === 0}
-                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
-                >
-                  <option value="">Selecione…</option>
-                  {modalReporters.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.nome?.trim() || "Sem nome"}
-                    </option>
-                  ))}
-                </select>
-                {!modalReportersLoading &&
-                  !modalReportersError &&
-                  modalReporters.length === 0 && (
-                    <p className="mt-1 text-xs text-amber-800">
-                      Nenhum usuário cadastrado. Use o Admin.
+                  {modalError && (
+                    <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                      {modalError}
                     </p>
                   )}
-              </div>
-              <div>
-                <label
-                  htmlFor="modal-pauta-editoria"
-                  className="block text-sm font-medium text-slate-700"
-                >
-                  Editoria
-                </label>
-                <select
-                  id="modal-pauta-editoria"
-                  value={modalEditoria}
-                  onChange={(e) => setModalEditoria(e.target.value)}
-                  disabled={modalSaving}
-                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
-                >
-                  {EDITORIA_OPTIONS.map((ed) => (
-                    <option key={ed} value={ed}>
-                      {ed}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="modal-pauta-data"
-                  className="block text-sm font-medium text-slate-700"
-                >
-                  Data (prazo)
-                </label>
-                <input
-                  id="modal-pauta-data"
-                  type="date"
-                  value={selectedDate}
-                  readOnly
-                  disabled
-                  aria-readonly="true"
-                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-700"
+                  <div>
+                    <label
+                      htmlFor="modal-pauta-titulo"
+                      className="block text-sm font-medium text-slate-700"
+                    >
+                      Título
+                    </label>
+                    <input
+                      id="modal-pauta-titulo"
+                      type="text"
+                      value={modalTitulo}
+                      onChange={(e) => setModalTitulo(e.target.value)}
+                      disabled={modalSaving}
+                      autoFocus
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+                      placeholder="Título provisório"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="modal-pauta-resumo"
+                      className="block text-sm font-medium text-slate-700"
+                    >
+                      Resumo
+                    </label>
+                    <textarea
+                      id="modal-pauta-resumo"
+                      value={modalResumo}
+                      onChange={(e) => setModalResumo(e.target.value)}
+                      disabled={modalSaving}
+                      rows={3}
+                      className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+                      placeholder="Resumo ou notas rápidas"
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="modal-pauta-reporter"
+                      className="block text-sm font-medium text-slate-700"
+                    >
+                      Repórter
+                    </label>
+                    {modalReportersLoading && (
+                      <p className="mt-1 text-xs text-slate-500" role="status">
+                        Carregando repórteres…
+                      </p>
+                    )}
+                    {modalReportersError && !modalReportersLoading && (
+                      <p className="mt-1 text-xs text-red-700">
+                        {modalReportersError}
+                      </p>
+                    )}
+                    <select
+                      id="modal-pauta-reporter"
+                      value={modalReporterId}
+                      onChange={(e) => setModalReporterId(e.target.value)}
+                      disabled={
+                        modalSaving ||
+                        modalReportersLoading ||
+                        modalReporters.length === 0
+                      }
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                    >
+                      <option value="">Selecione…</option>
+                      {modalReporters.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.nome?.trim() || "Sem nome"}
+                        </option>
+                      ))}
+                    </select>
+                    {!modalReportersLoading &&
+                      !modalReportersError &&
+                      modalReporters.length === 0 && (
+                        <p className="mt-1 text-xs text-amber-800">
+                          Nenhum usuário cadastrado. Use o Admin.
+                        </p>
+                      )}
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="modal-pauta-editoria"
+                      className="block text-sm font-medium text-slate-700"
+                    >
+                      Editoria
+                    </label>
+                    <select
+                      id="modal-pauta-editoria"
+                      value={modalEditoria}
+                      onChange={(e) => setModalEditoria(e.target.value)}
+                      disabled={modalSaving}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                    >
+                      {EDITORIA_OPTIONS.map((ed) => (
+                        <option key={ed} value={ed}>
+                          {ed}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="modal-pauta-data"
+                      className="block text-sm font-medium text-slate-700"
+                    >
+                      Data (prazo)
+                    </label>
+                    <input
+                      id="modal-pauta-data"
+                      type="date"
+                      value={selectedDate}
+                      readOnly
+                      disabled
+                      aria-readonly="true"
+                      className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-700"
+                    />
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => requestCloseDayModal()}
+                      disabled={modalSaving}
+                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:opacity-60"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={modalSaving}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-60"
+                    >
+                      {modalSaving ? "Salvando…" : "Salvar"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
+
+            {modalTab === "escala" && (
+              <div className="mt-4" role="tabpanel">
+                <p className="mb-3 text-sm text-slate-600">
+                  {editingEscala ? (
+                    <>
+                      Editando entrada de{" "}
+                      <span className="font-medium text-slate-800">
+                        {formatDeadlinePtBR(selectedDate)}
+                      </span>
+                      . Use <span className="font-medium">Excluir</span> no
+                      rodapé para remover.
+                    </>
+                  ) : (
+                    <>
+                      Data do calendário:{" "}
+                      <span className="font-medium text-slate-800">
+                        {formatDeadlinePtBR(selectedDate)}
+                      </span>{" "}
+                      — ao escolher o tipo, os campos de data serão preenchidos
+                      com este dia (férias: início e fim).
+                    </>
+                  )}
+                </p>
+                <EscalaForm
+                  key={
+                    editingEscala
+                      ? `modal-escala-edit-${editingEscala.id}`
+                      : `modal-escala-new-${selectedDate}`
+                  }
+                  variant="embedded"
+                  defaultDateYmd={selectedDate}
+                  initialEscala={escalaFormInitial}
+                  usuarios={modalReporters}
+                  usuariosLoading={modalReportersLoading}
+                  idPrefix="modal-escala"
+                  onSuccess={() => {
+                    closeNovaPautaModal();
+                    void load();
+                  }}
+                  onDirtyChange={setEscalaFormDirty}
+                  onSavingChange={setEscalaSaving}
                 />
               </div>
-              <div className="flex flex-wrap justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => !modalSaving && closeNovaPautaModal()}
-                  disabled={modalSaving}
-                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:opacity-60"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={modalSaving}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-60"
-                >
-                  {modalSaving ? "Salvando…" : "Salvar"}
-                </button>
-              </div>
-            </form>
+            )}
           </div>
         </div>
       )}

@@ -51,6 +51,15 @@ export function LoginForm() {
         return;
       }
 
+      try {
+        await fetch("/api/auth/session-start", {
+          method: "POST",
+          credentials: "include",
+        });
+      } catch {
+        /* middleware inicia a janela de 23h no primeiro acesso protegido */
+      }
+
       router.push(safeNextPath(searchParams.get("next")));
       router.refresh();
     },

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useState, type FormEvent } from "react";
 import { createUsuariosRowAction } from "@/app/actions/admin";
-import { createBrowserClient } from "@/lib/supabase/client";
 
 export default function AdminNovoUsuarioPage() {
   const router = useRouter();
@@ -17,13 +16,6 @@ export default function AdminNovoUsuarioPage() {
     type: "ok" | "err";
     text: string;
   } | null>(null);
-
-  const handleLogout = useCallback(async () => {
-    const supabase = createBrowserClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }, [router]);
 
   const handleSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
@@ -69,13 +61,6 @@ export default function AdminNovoUsuarioPage() {
             >
               Voltar à lista
             </Link>
-            <button
-              type="button"
-              onClick={() => void handleLogout()}
-              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              Sair
-            </button>
           </div>
         </header>
 

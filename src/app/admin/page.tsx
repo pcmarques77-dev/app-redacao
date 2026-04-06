@@ -98,13 +98,6 @@ function AdminUsuariosPageContent() {
     });
   }, []);
 
-  const handleLogout = useCallback(async () => {
-    const supabase = createBrowserClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }, [router]);
-
   const openEdit = useCallback((row: UsuarioTableRow) => {
     setEditing(row);
     setEditNome(row.nome?.trim() ?? "");
@@ -203,13 +196,6 @@ function AdminUsuariosPageContent() {
             >
               Voltar ao painel
             </Link>
-            <button
-              type="button"
-              onClick={() => void handleLogout()}
-              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              Sair
-            </button>
           </div>
         </header>
 

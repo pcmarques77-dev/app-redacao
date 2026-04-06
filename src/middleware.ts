@@ -1,5 +1,34 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  SESSION_START_COOKIE,
+  SESSION_WALL_MS,
+} from "@/lib/session-constants";
+
+async function signOutAndRedirectToLogin(
+  request: NextRequest,
+  supabaseUrl: string,
+  anonKey: string
+) {
+  const redirectRes = NextResponse.redirect(new URL("/login", request.url));
+  redirectRes.cookies.delete(SESSION_START_COOKIE);
+
+  const supabase = createServerClient(supabaseUrl, anonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) =>
+          redirectRes.cookies.set(name, value, options)
+        );
+      },
+    },
+  });
+
+  await supabase.auth.signOut();
+  return redirectRes;
+}
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -40,15 +69,29 @@ export async function middleware(request: NextRequest) {
     path.startsWith("/nova-pauta") ||
     path.startsWith("/pauta/") ||
     path.startsWith("/admin") ||
+    path.startsWith("/escala") ||
     path.startsWith("/radar-pautas") ||
     path.startsWith("/ronda") ||
     path.startsWith("/api/ronda");
+
+  let sessionStartTs: number | null = null;
+  if (user) {
+    const startRaw = request.cookies.get(SESSION_START_COOKIE)?.value;
+    sessionStartTs =
+      startRaw && /^\d{10,}$/.test(startRaw) ? Number(startRaw) : null;
+
+    if (sessionStartTs != null && Date.now() - sessionStartTs > SESSION_WALL_MS) {
+      return signOutAndRedirectToLogin(request, url, anon);
+    }
+  }
 
   if (!user && isProtected && !isLogin) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("next", path);
-    return NextResponse.redirect(redirectUrl);
+    const r = NextResponse.redirect(redirectUrl);
+    r.cookies.delete(SESSION_START_COOKIE);
+    return r;
   }
 
   if (user && isLogin) {
@@ -56,6 +99,20 @@ export async function middleware(request: NextRequest) {
     redirectUrl.pathname = "/";
     redirectUrl.searchParams.delete("next");
     return NextResponse.redirect(redirectUrl);
+  }
+
+  if (!user && request.cookies.has(SESSION_START_COOKIE)) {
+    supabaseResponse.cookies.delete(SESSION_START_COOKIE);
+  }
+
+  if (user && sessionStartTs == null && !isLogin && isProtected) {
+    supabaseResponse.cookies.set(SESSION_START_COOKIE, String(Date.now()), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: Math.floor(SESSION_WALL_MS / 1000),
+    });
   }
 
   return supabaseResponse;
