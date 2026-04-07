@@ -76,8 +76,9 @@ function isFeriasTipo(t: string | null): boolean {
   return normalizeEscalaTipo(t) === "ferias";
 }
 
-function isCoordenacaoTipo(t: string | null): boolean {
-  return normalizeEscalaTipo(t) === "coordenacao";
+function isFeriadoTipo(t: string | null): boolean {
+  const n = normalizeEscalaTipo(t);
+  return n === "feriado" || n === "coordenacao";
 }
 
 function dayYmdInFeriasRange(
@@ -355,28 +356,45 @@ function PautasCalendar({
     setDropHighlightKey(null);
   }, []);
 
-  const renderCoordenacaoNoDia = (dayKey: string) => {
-    const rows = escalas.filter(
-      (e) => isCoordenacaoTipo(e.tipo) && e.data_inicio?.trim() === dayKey
-    );
+  const renderFeriadoNoDia = (dayKey: string) => {
+    const rows = escalas.filter((e) => {
+      if (!isFeriadoTipo(e.tipo)) return false;
+      const ini = e.data_inicio?.trim() ?? "";
+      const fim = e.data_fim?.trim() || ini;
+      return dayYmdInFeriasRange(dayKey, ini, fim);
+    });
     if (rows.length === 0) return null;
     return (
       <div className="mt-1 space-y-1">
-        {rows.map((e) => (
-          <button
-            key={`escala-coord-${e.id}`}
-            type="button"
-            onClick={(ev) => {
-              ev.stopPropagation();
-              onEscalaCardClick?.(e, dayKey);
-            }}
-            className="block w-full cursor-pointer rounded border border-violet-400/70 bg-violet-100 px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-violet-950 shadow-sm transition hover:ring-2 hover:ring-violet-400/50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-violet-500"
-          >
-            <span className="line-clamp-2 font-semibold">
-              👑 Coordenação: {escalaUsuarioNome(e)}
-            </span>
-          </button>
-        ))}
+        {rows.map((e) => {
+          const ini = e.data_inicio?.trim() ?? "";
+          const fim = e.data_fim?.trim() || ini;
+          const nomeFeriado = e.coordenador?.trim() || "Feriado";
+          const periodoLabel =
+            ini === fim
+              ? formatDeadlinePtBR(ini)
+              : `${formatDeadlinePtBR(ini)} – ${formatDeadlinePtBR(fim)}`;
+          return (
+            <button
+              key={`escala-feriado-${e.id}`}
+              type="button"
+              onClick={(ev) => {
+                ev.stopPropagation();
+                onEscalaCardClick?.(e, dayKey);
+              }}
+              className="block w-full cursor-pointer rounded border border-violet-400/70 bg-violet-100 px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-violet-950 shadow-sm transition hover:ring-2 hover:ring-violet-400/50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-violet-500"
+            >
+              <span className="line-clamp-2 font-semibold">
+                👑 {nomeFeriado}: {escalaUsuarioNome(e)}
+              </span>
+              {periodoLabel && (
+                <span className="mt-0.5 block truncate text-[9px] font-normal tabular-nums opacity-85">
+                  {periodoLabel}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
     );
   };
@@ -580,7 +598,7 @@ function PautasCalendar({
                         dayKey,
                         "max-h-[5.5rem] space-y-1 overflow-y-auto sm:max-h-[6.5rem]"
                       )}
-                      {renderCoordenacaoNoDia(dayKey)}
+                      {renderFeriadoNoDia(dayKey)}
                       {renderPlantoesNoDia(dayKey)}
                       {renderFeriasNoDia(dayKey)}
                     </>
@@ -631,7 +649,7 @@ function PautasCalendar({
                     dayKey,
                     "max-h-[min(24rem,calc(100vh-18rem))] space-y-1 overflow-y-auto sm:max-h-[min(28rem,calc(100vh-16rem))]"
                   )}
-                  {renderCoordenacaoNoDia(dayKey)}
+                  {renderFeriadoNoDia(dayKey)}
                   {renderPlantoesNoDia(dayKey)}
                   {renderFeriasNoDia(dayKey)}
                 </div>
@@ -775,6 +793,7 @@ export function PautasDashboard() {
       usuario_id: editingEscala.usuario_id.trim(),
       data_inicio: editingEscala.data_inicio,
       data_fim: editingEscala.data_fim,
+      coordenador: editingEscala.coordenador,
       horario: editingEscala.horario,
     };
   }, [editingEscala]);

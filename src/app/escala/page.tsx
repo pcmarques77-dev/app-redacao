@@ -20,7 +20,7 @@ export default function EscalaPage() {
           Escala
         </h1>
         <p className="mt-2 text-sm text-slate-600">
-          Cadastre coordenação, plantão ou férias para aparecer no calendário.
+          Cadastre feriado, plantão ou férias para aparecer no calendário.
         </p>
       </header>
 

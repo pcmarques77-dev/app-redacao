@@ -12,9 +12,14 @@ import {
 import { deleteEscala } from "@/app/actions/escalas";
 import { createBrowserClient } from "@/lib/supabase/client";
 
-export const ESCALA_TIPO_COORDENACAO = "Coordenação";
+export const ESCALA_TIPO_FERIADO = "Feriado";
 export const ESCALA_TIPO_PLANTAO = "Plantão";
 export const ESCALA_TIPO_FERIAS = "Férias";
+
+/** @deprecated Use `ESCALA_TIPO_FERIADO`. Mantido para leitura de registros antigos no banco. */
+export const ESCALA_TIPO_COORDENACAO = "Coordenação";
+
+const NOME_FERIADO_MAX = 30;
 
 export type EscalaUsuarioOption = {
   id: string;
@@ -28,6 +33,8 @@ export type EscalaInitialValues = {
   usuario_id: string;
   data_inicio: string | null;
   data_fim: string | null;
+  /** Nome do feriado (até 30 caracteres); coluna `coordenador` em `escalas`. */
+  coordenador?: string | null;
   horario: string | null;
 };
 
@@ -50,7 +57,9 @@ export type EscalaFormProps = {
 function serialize(
   tipo: string,
   usuarioId: string,
-  dataCoordenacao: string,
+  nomeFeriado: string,
+  dataInicioFeriado: string,
+  dataFimFeriado: string,
   dataPlantao: string,
   horario: string,
   dataInicioFerias: string,
@@ -59,7 +68,9 @@ function serialize(
   return JSON.stringify({
     tipo,
     usuarioId,
-    dataCoordenacao,
+    nomeFeriado,
+    dataInicioFeriado,
+    dataFimFeriado,
     dataPlantao,
     horario,
     dataInicioFerias,
@@ -80,7 +91,9 @@ function readInitial(
 ): {
   tipo: string;
   usuarioId: string;
-  dataCoordenacao: string;
+  nomeFeriado: string;
+  dataInicioFeriado: string;
+  dataFimFeriado: string;
   dataPlantao: string;
   horario: string;
   dataInicioFerias: string;
@@ -90,7 +103,9 @@ function readInitial(
     return {
       tipo: "",
       usuarioId: "",
-      dataCoordenacao: "",
+      nomeFeriado: "",
+      dataInicioFeriado: "",
+      dataFimFeriado: "",
       dataPlantao: "",
       horario: "",
       dataInicioFerias: "",
@@ -100,10 +115,17 @@ function readInitial(
   const n = normalizeTipoKey(initialEscala.tipo);
   const di = initialEscala.data_inicio?.trim() ?? "";
   const df = initialEscala.data_fim?.trim() ?? "";
+  const isFeriado = n === "coordenacao" || n === "feriado";
+  let tipoOut = (initialEscala.tipo ?? "").trim();
+  if (n === "coordenacao") tipoOut = ESCALA_TIPO_FERIADO;
   return {
-    tipo: (initialEscala.tipo ?? "").trim(),
+    tipo: tipoOut,
     usuarioId: initialEscala.usuario_id,
-    dataCoordenacao: n === "coordenacao" ? di : "",
+    nomeFeriado: isFeriado
+      ? (initialEscala.coordenador?.trim() ?? "").slice(0, NOME_FERIADO_MAX)
+      : "",
+    dataInicioFeriado: isFeriado ? di : "",
+    dataFimFeriado: isFeriado ? (df || di) : "",
     dataPlantao: n === "plantao" ? di : "",
     horario: initialEscala.horario?.trim() ?? "",
     dataInicioFerias: n === "ferias" ? di : "",
@@ -137,8 +159,14 @@ export function EscalaForm({
   const [usuarioId, setUsuarioId] = useState(
     () => readInitial(initialEscala).usuarioId
   );
-  const [dataCoordenacao, setDataCoordenacao] = useState(
-    () => readInitial(initialEscala).dataCoordenacao
+  const [nomeFeriado, setNomeFeriado] = useState(
+    () => readInitial(initialEscala).nomeFeriado
+  );
+  const [dataInicioFeriado, setDataInicioFeriado] = useState(
+    () => readInitial(initialEscala).dataInicioFeriado
+  );
+  const [dataFimFeriado, setDataFimFeriado] = useState(
+    () => readInitial(initialEscala).dataFimFeriado
   );
   const [dataPlantao, setDataPlantao] = useState(
     () => readInitial(initialEscala).dataPlantao
@@ -156,14 +184,16 @@ export function EscalaForm({
   const [formError, setFormError] = useState<string | null>(null);
 
   const baselineRef = useRef<string>(
-    serialize("", "", "", "", "", "", "")
+    serialize("", "", "", "", "", "", "", "", "")
   );
 
   useLayoutEffect(() => {
     baselineRef.current = serialize(
       tipo,
       usuarioId,
-      dataCoordenacao,
+      nomeFeriado,
+      dataInicioFeriado,
+      dataFimFeriado,
       dataPlantao,
       horario,
       dataInicioFerias,
@@ -219,7 +249,10 @@ export function EscalaForm({
     (t: string) => {
       if (!defaultDateYmd?.trim()) return;
       const d = defaultDateYmd.trim();
-      if (t === ESCALA_TIPO_COORDENACAO) setDataCoordenacao(d);
+      if (t === ESCALA_TIPO_FERIADO) {
+        setDataInicioFeriado(d);
+        setDataFimFeriado(d);
+      }
       if (t === ESCALA_TIPO_PLANTAO) setDataPlantao(d);
       if (t === ESCALA_TIPO_FERIAS) {
         setDataInicioFerias(d);
@@ -230,7 +263,9 @@ export function EscalaForm({
   );
 
   const resetTipoFields = useCallback(() => {
-    setDataCoordenacao("");
+    setNomeFeriado("");
+    setDataInicioFeriado("");
+    setDataFimFeriado("");
     setDataPlantao("");
     setHorario("");
     setDataInicioFerias("");
@@ -242,7 +277,9 @@ export function EscalaForm({
     const cur = serialize(
       tipo,
       usuarioId,
-      dataCoordenacao,
+      nomeFeriado,
+      dataInicioFeriado,
+      dataFimFeriado,
       dataPlantao,
       horario,
       dataInicioFerias,
@@ -252,7 +289,9 @@ export function EscalaForm({
   }, [
     tipo,
     usuarioId,
-    dataCoordenacao,
+    nomeFeriado,
+    dataInicioFeriado,
+    dataFimFeriado,
     dataPlantao,
     horario,
     dataInicioFerias,
@@ -264,7 +303,7 @@ export function EscalaForm({
     setTipo(v);
     resetTipoFields();
     if (
-      v === ESCALA_TIPO_COORDENACAO ||
+      v === ESCALA_TIPO_FERIADO ||
       v === ESCALA_TIPO_PLANTAO ||
       v === ESCALA_TIPO_FERIAS
     ) {
@@ -308,9 +347,18 @@ export function EscalaForm({
         return;
       }
 
-      if (tipo === ESCALA_TIPO_COORDENACAO) {
-        if (!dataCoordenacao.trim()) {
-          setFormError("Informe a data.");
+      if (tipo === ESCALA_TIPO_FERIADO) {
+        const nome = nomeFeriado.trim().slice(0, NOME_FERIADO_MAX);
+        if (!nome) {
+          setFormError("Informe o nome do feriado.");
+          return;
+        }
+        if (!dataInicioFeriado.trim() || !dataFimFeriado.trim()) {
+          setFormError("Informe as datas de início e fim.");
+          return;
+        }
+        if (dataFimFeriado < dataInicioFeriado) {
+          setFormError("A data fim não pode ser anterior à data início.");
           return;
         }
       } else if (tipo === ESCALA_TIPO_PLANTAO) {
@@ -332,18 +380,14 @@ export function EscalaForm({
       setSaving(true);
       const supabase = createBrowserClient();
 
-      const baseNulls = {
-        coordenador: null as string | null,
-      };
-
       let row: Record<string, unknown>;
-      if (tipo === ESCALA_TIPO_COORDENACAO) {
+      if (tipo === ESCALA_TIPO_FERIADO) {
         row = {
-          tipo: ESCALA_TIPO_COORDENACAO,
+          tipo: ESCALA_TIPO_FERIADO,
           usuario_id: usuarioId.trim(),
-          data_inicio: dataCoordenacao.trim(),
-          data_fim: null,
-          ...baseNulls,
+          data_inicio: dataInicioFeriado.trim(),
+          data_fim: dataFimFeriado.trim(),
+          coordenador: nomeFeriado.trim().slice(0, NOME_FERIADO_MAX),
           horario: null,
         };
       } else if (tipo === ESCALA_TIPO_PLANTAO) {
@@ -352,7 +396,7 @@ export function EscalaForm({
           usuario_id: usuarioId.trim(),
           data_inicio: dataPlantao.trim(),
           data_fim: null,
-          ...baseNulls,
+          coordenador: null,
           horario: horario.trim() || null,
         };
       } else {
@@ -361,7 +405,7 @@ export function EscalaForm({
           usuario_id: usuarioId.trim(),
           data_inicio: dataInicioFerias.trim(),
           data_fim: dataFimFerias.trim(),
-          ...baseNulls,
+          coordenador: null,
           horario: null,
         };
       }
@@ -384,7 +428,9 @@ export function EscalaForm({
       baselineRef.current = serialize(
         tipo,
         usuarioId,
-        dataCoordenacao,
+        nomeFeriado,
+        dataInicioFeriado,
+        dataFimFeriado,
         dataPlantao,
         horario,
         dataInicioFerias,
@@ -397,7 +443,9 @@ export function EscalaForm({
       editingId,
       tipo,
       usuarioId,
-      dataCoordenacao,
+      nomeFeriado,
+      dataInicioFeriado,
+      dataFimFeriado,
       dataPlantao,
       horario,
       dataInicioFerias,
@@ -447,7 +495,7 @@ export function EscalaForm({
           className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
         >
           <option value="">Selecione…</option>
-          <option value={ESCALA_TIPO_COORDENACAO}>{ESCALA_TIPO_COORDENACAO}</option>
+          <option value={ESCALA_TIPO_FERIADO}>{ESCALA_TIPO_FERIADO}</option>
           <option value={ESCALA_TIPO_PLANTAO}>{ESCALA_TIPO_PLANTAO}</option>
           <option value={ESCALA_TIPO_FERIAS}>{ESCALA_TIPO_FERIAS}</option>
         </select>
@@ -483,24 +531,67 @@ export function EscalaForm({
         </select>
       </div>
 
-      {tipo === ESCALA_TIPO_COORDENACAO && (
-        <div>
-          <label
-            htmlFor={`${idPrefix}-data-coord`}
-            className="block text-sm font-medium text-slate-700"
-          >
-            Data
-          </label>
-          <input
-            id={`${idPrefix}-data-coord`}
-            type="date"
-            value={dataCoordenacao}
-            onChange={(e) => setDataCoordenacao(e.target.value)}
-            disabled={formDisabled}
-            required
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
-          />
-        </div>
+      {tipo === ESCALA_TIPO_FERIADO && (
+        <>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-nome-feriado`}
+              className="block text-sm font-medium text-slate-700"
+            >
+              Nome do feriado{" "}
+              <span className="font-normal text-slate-500">
+                (máx. {NOME_FERIADO_MAX} caracteres)
+              </span>
+            </label>
+            <input
+              id={`${idPrefix}-nome-feriado`}
+              type="text"
+              value={nomeFeriado}
+              onChange={(e) =>
+                setNomeFeriado(e.target.value.slice(0, NOME_FERIADO_MAX))
+              }
+              disabled={formDisabled}
+              maxLength={NOME_FERIADO_MAX}
+              required
+              placeholder="Ex.: Tiradentes"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-ini-feriado`}
+              className="block text-sm font-medium text-slate-700"
+            >
+              Início
+            </label>
+            <input
+              id={`${idPrefix}-ini-feriado`}
+              type="date"
+              value={dataInicioFeriado}
+              onChange={(e) => setDataInicioFeriado(e.target.value)}
+              disabled={formDisabled}
+              required
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-fim-feriado`}
+              className="block text-sm font-medium text-slate-700"
+            >
+              Fim
+            </label>
+            <input
+              id={`${idPrefix}-fim-feriado`}
+              type="date"
+              value={dataFimFeriado}
+              onChange={(e) => setDataFimFeriado(e.target.value)}
+              disabled={formDisabled}
+              required
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+            />
+          </div>
+        </>
       )}
 
       {tipo === ESCALA_TIPO_PLANTAO && (
