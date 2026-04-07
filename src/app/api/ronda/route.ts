@@ -402,17 +402,22 @@ const getRondaCached = unstable_cache(scrapeRondaNoticias, ["ronda-scrape-v2"], 
   revalidate: 90,
 });
 
+/** Evita cache na CDN/navegador; no deploy (Vercel) GET dinâmico às vezes ganha headers agressivos. */
+const JSON_NO_STORE = {
+  "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+} as const;
+
 export async function GET(request: NextRequest) {
   const refresh = request.nextUrl.searchParams.get("refresh") === "1";
 
   try {
     const data = refresh ? await scrapeRondaNoticias() : await getRondaCached();
-    return NextResponse.json(data);
+    return NextResponse.json(data, { headers: JSON_NO_STORE });
   } catch (e) {
     console.error("[ronda]", e);
     return NextResponse.json(
       { ok: false, error: "Falha ao montar a ronda." },
-      { status: 500 }
+      { status: 500, headers: JSON_NO_STORE }
     );
   }
 }
