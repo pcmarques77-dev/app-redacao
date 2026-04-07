@@ -39,8 +39,10 @@ function formatPublicadoNoSite(iso: string | null): string {
 }
 
 type RondaClientProps = {
-  /** Título principal do cabeçalho (ex.: rota /radar-pautas). */
+  /** Título principal do cabeçalho (ex.: /ronda-rss ou /radar-pautas). */
   pageTitle?: string;
+  /** Endpoint JSON com o mesmo formato de `/api/ronda`. */
+  apiPath?: string;
   /** Busca a lista ao abrir ou recarregar a página. */
   autoLoadOnMount?: boolean;
   /** Texto do botão de atualização manual. */
@@ -51,6 +53,7 @@ type RondaClientProps = {
 
 export function RondaClient({
   pageTitle = "Ronda Semiautomática",
+  apiPath = "/api/ronda",
   autoLoadOnMount = false,
   atualizarLabel = "Atualizar Ronda",
   tituloEhLink = false,
@@ -66,7 +69,7 @@ export function RondaClient({
     setCarregandoLista(true);
     try {
       const q = forceRefresh ? "?refresh=1" : "";
-      const res = await fetch(`/api/ronda${q}`);
+      const res = await fetch(`${apiPath}${q}`);
       const raw = await res.text();
       let body: {
         ok?: boolean;
@@ -94,7 +97,7 @@ export function RondaClient({
       setCarregandoLista(false);
       setJaBuscou(true);
     }
-  }, []);
+  }, [apiPath]);
 
   useEffect(() => {
     if (!autoLoadOnMount || autoLoadFeito.current) return;

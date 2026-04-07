@@ -71,7 +71,9 @@ export async function middleware(request: NextRequest) {
     path.startsWith("/admin") ||
     path.startsWith("/escala") ||
     path.startsWith("/radar-pautas") ||
+    path.startsWith("/ronda-rss") ||
     path.startsWith("/ronda") ||
+    path.startsWith("/api/ronda-rss") ||
     path.startsWith("/api/ronda");
 
   let sessionStartTs: number | null = null;

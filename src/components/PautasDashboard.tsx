@@ -1269,8 +1269,8 @@ export function PautasDashboard() {
             Admin
           </Link>
           <Link
-            href="/radar-pautas"
-            className="inline-flex items-center justify-center rounded-md border border-teal-200 bg-teal-50 px-4 py-2.5 text-sm font-medium text-teal-900 shadow-sm transition-colors hover:bg-teal-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-500"
+            href="/ronda-rss"
+            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
             Radar de Pautas
           </Link>
