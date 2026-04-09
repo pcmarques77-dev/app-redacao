@@ -10,6 +10,7 @@ import {
   type DragEvent,
   type FormEvent,
   type MouseEvent,
+  type ReactNode,
 } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
 import {
@@ -253,7 +254,6 @@ function statusCalendarChipClass(status: string | null): string {
 
 function PautasCalendar({
   scope,
-  onScopeChange,
   monthAnchor,
   weekStart,
   onPrevMonth,
@@ -263,11 +263,11 @@ function PautasCalendar({
   pautasPorDia,
   escalas,
   onDropDeadline,
+  controlsContent,
   onDayClick,
   onEscalaCardClick,
 }: {
   scope: "month" | "week";
-  onScopeChange: (s: "month" | "week") => void;
   monthAnchor: Date;
   weekStart: Date;
   onPrevMonth: () => void;
@@ -277,6 +277,7 @@ function PautasCalendar({
   pautasPorDia: Map<string, PautaRow[]>;
   escalas: EscalaRow[];
   onDropDeadline: (pautaId: string, targetDayYmd: string) => void | Promise<void>;
+  controlsContent?: ReactNode;
   onDayClick?: (dayYmd: string) => void;
   onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
 }) {
@@ -526,42 +527,7 @@ function PautasCalendar({
           {scope === "month" ? "Próximo mês →" : "Próxima semana →"}
         </button>
       </div>
-      <div className="flex flex-wrap items-center justify-center gap-2 border-b border-slate-200 bg-slate-50/90 px-4 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Período
-        </span>
-        <div
-          className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 shadow-inner"
-          role="group"
-          aria-label="Alternar entre visão mensal e semanal"
-        >
-          <button
-            type="button"
-            onClick={() => onScopeChange("month")}
-            aria-pressed={scope === "month"}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:text-sm ${
-              scope === "month"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            Mês
-          </button>
-          <button
-            type="button"
-            onClick={() => onScopeChange("week")}
-            aria-pressed={scope === "week"}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors sm:text-sm ${
-              scope === "week"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            Semana
-          </button>
-        </div>
-      </div>
-
+      {controlsContent}
       {scope === "month" ? (
         <>
           <div className="grid grid-cols-7 gap-px border-b border-slate-200 bg-slate-200">
@@ -1264,9 +1230,136 @@ export function PautasDashboard() {
     ]
   );
 
+  const controlsLinha = (
+    <div
+      className="flex flex-col items-center justify-between gap-4 border-b border-slate-200 px-[15px] py-3 md:flex-row"
+      role="search"
+      aria-label="Filtros e visualização"
+    >
+      <div className="flex w-full items-center gap-3 md:w-auto">
+        <select
+          id="filtro-reporter"
+          value={filtroReporter}
+          onChange={(e) => setFiltroReporter(e.target.value)}
+          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 md:w-56"
+        >
+          <option value="Todos">Todos os Repórteres</option>
+          {opcoesReporters.map((nome) => (
+            <option key={nome} value={nome}>
+              {nome}
+            </option>
+          ))}
+        </select>
+        <select
+          id="filtro-editoria"
+          value={filtroEditoria}
+          onChange={(e) => setFiltroEditoria(e.target.value)}
+          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 md:w-56"
+        >
+          <option value="Todos">Todas as Editorias</option>
+          {opcoesEditorias.map((ed) => (
+            <option key={ed} value={ed}>
+              {ed}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="flex w-full flex-wrap items-center justify-end gap-4 md:w-auto">
+        <div
+          className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 shadow-inner"
+          role="group"
+          aria-label="Alternar entre visão mensal e semanal"
+        >
+          <button
+            type="button"
+            onClick={() => handleCalendarScopeChange("month")}
+            aria-pressed={calendarScope === "month"}
+            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+              calendarScope === "month"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            Mês
+          </button>
+          <button
+            type="button"
+            onClick={() => handleCalendarScopeChange("week")}
+            aria-pressed={calendarScope === "week"}
+            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+              calendarScope === "week"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            Semana
+          </button>
+        </div>
+        <div
+          className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 shadow-inner"
+          role="group"
+          aria-label="Alternar entre calendário e lista"
+        >
+          <button
+            type="button"
+            onClick={() => setViewMode("calendario")}
+            aria-pressed={viewMode === "calendario"}
+            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+              viewMode === "calendario"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <svg
+              className="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5a2.25 2.25 0 002.25-2.25m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5a2.25 2.25 0 012.25 2.25v7.5"
+              />
+            </svg>
+            Calendário
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("lista")}
+            aria-pressed={viewMode === "lista"}
+            className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+              viewMode === "lista"
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <svg
+              className="h-4 w-4 shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
+              />
+            </svg>
+            Lista
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
-      <header className="mb-10 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
+      <header className="mb-0 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <Link
             href="/"
@@ -1354,121 +1447,7 @@ export function PautasDashboard() {
             </div>
           )}
 
-          <div
-            className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
-            role="search"
-            aria-label="Filtros e visualização"
-          >
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-6">
-              <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:gap-6">
-                <div className="min-w-0 flex-1">
-                  <label
-                    htmlFor="filtro-reporter"
-                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500"
-                  >
-                    Filtrar por Repórter
-                  </label>
-                  <select
-                    id="filtro-reporter"
-                    value={filtroReporter}
-                    onChange={(e) => setFiltroReporter(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                  >
-                    <option value="Todos">Todos os Repórteres</option>
-                    {opcoesReporters.map((nome) => (
-                      <option key={nome} value={nome}>
-                        {nome}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <label
-                    htmlFor="filtro-editoria"
-                    className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500"
-                  >
-                    Filtrar por Editoria
-                  </label>
-                  <select
-                    id="filtro-editoria"
-                    value={filtroEditoria}
-                    onChange={(e) => setFiltroEditoria(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                  >
-                    <option value="Todos">Todas as Editorias</option>
-                    {opcoesEditorias.map((ed) => (
-                      <option key={ed} value={ed}>
-                        {ed}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="flex shrink-0 flex-col gap-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Visualização
-                </span>
-                <div
-                  className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 shadow-inner"
-                  role="group"
-                  aria-label="Alternar entre calendário e lista"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("calendario")}
-                    aria-pressed={viewMode === "calendario"}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                      viewMode === "calendario"
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <svg
-                      className="h-4 w-4 shrink-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={1.5}
-                      stroke="currentColor"
-                      aria-hidden
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5a2.25 2.25 0 002.25-2.25m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5a2.25 2.25 0 012.25 2.25v7.5"
-                      />
-                    </svg>
-                    Calendário
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("lista")}
-                    aria-pressed={viewMode === "lista"}
-                    className={`inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                      viewMode === "lista"
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-600 hover:text-slate-900"
-                    }`}
-                  >
-                    <svg
-                      className="h-4 w-4 shrink-0"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth={1.5}
-                      stroke="currentColor"
-                      aria-hidden
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M8.25 6.75h12M8.25 12h12m-12 5.25h12M3.75 6.75h.007v.008H3.75V6.75zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zM3.75 12h.007v.008H3.75V12zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm-.375 5.25h.007v.008H3.75v-.008zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z"
-                      />
-                    </svg>
-                    Lista
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          {viewMode === "lista" && <div className="mb-6">{controlsLinha}</div>}
 
           {selecionadas.length > 0 && (
             <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -1690,7 +1669,6 @@ export function PautasDashboard() {
           {viewMode === "calendario" && (
             <PautasCalendar
               scope={calendarScope}
-              onScopeChange={handleCalendarScopeChange}
               monthAnchor={calendarMonth}
               weekStart={calendarWeekStart}
               onPrevMonth={() =>
@@ -1712,6 +1690,7 @@ export function PautasDashboard() {
               pautasPorDia={pautasPorDia}
               escalas={escalas}
               onDropDeadline={handleCalendarDeadlineDrop}
+              controlsContent={controlsLinha}
               onDayClick={handleCalendarDayClick}
               onEscalaCardClick={handleEscalaCardClick}
             />
