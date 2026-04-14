@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -12,6 +13,11 @@ import {
   type FormEvent,
 } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
+import { isEditorRole, isSuperAdminEmail } from "@/lib/admin-acl";
+import {
+  createPautaAction,
+  getPautaSessionAction,
+} from "@/app/actions/pautas";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
 
 function pad2(n: number): string {
@@ -223,6 +229,45 @@ export default function NovaPautaPage() {
   const [uploadErro, setUploadErro] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
 
+  const [sessionCtx, setSessionCtx] = useState<{
+    userId: string;
+    email: string;
+    funcao: string | null;
+  } | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+
+  const privilegedSession = useMemo(
+    () =>
+      sessionCtx
+        ? isSuperAdminEmail(sessionCtx.email) ||
+          isEditorRole(sessionCtx.funcao)
+        : false,
+    [sessionCtx]
+  );
+
+  useEffect(() => {
+    void getPautaSessionAction().then((r) => {
+      setSessionReady(true);
+      if (r.ok) {
+        setSessionCtx({
+          userId: r.userId,
+          email: r.email,
+          funcao: r.funcao,
+        });
+        setSessionError(null);
+      } else {
+        setSessionCtx(null);
+        setSessionError(r.error);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!sessionCtx || privilegedSession) return;
+    setReporterId(sessionCtx.userId);
+  }, [sessionCtx, privilegedSession]);
+
   useEffect(() => {
     let cancelled = false;
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -353,21 +398,17 @@ export default function NovaPautaPage() {
     async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
       setErroFormPauta(null);
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url?.trim() || !key?.trim()) {
-        setErroFormPauta(
-          "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no arquivo .env.local."
-        );
-        return;
-      }
       const titulo = tituloProvisorio.trim();
       if (!titulo) {
         setErroFormPauta("Informe o título provisório.");
         return;
       }
-      if (!reporterId.trim()) {
+      if (privilegedSession && !reporterId.trim()) {
         setErroFormPauta("Selecione um repórter.");
+        return;
+      }
+      if (!privilegedSession && !sessionCtx?.userId) {
+        setErroFormPauta("Sessão inválida. Atualize a página e tente novamente.");
         return;
       }
 
@@ -377,21 +418,22 @@ export default function NovaPautaPage() {
         : getLastBusinessDayOfMonth();
 
       setSalvandoPauta(true);
-      const supabase = createBrowserClient();
-      const { error: insertErr } = await supabase.from("pautas").insert({
+      const insertRes = await createPautaAction({
         titulo_provisorio: titulo,
         fontes: fontes.trim() || null,
         arquivos_urls: arquivosUrls,
         editoria,
         deadline: deadlineFinal,
         status,
-        reporter_id: reporterId.trim(),
+        reporter_id: privilegedSession
+          ? reporterId.trim()
+          : sessionCtx!.userId,
       });
 
       setSalvandoPauta(false);
 
-      if (insertErr) {
-        setErroFormPauta(insertErr.message || "Não foi possível salvar a pauta.");
+      if (!insertRes.ok) {
+        setErroFormPauta(insertRes.error || "Não foi possível salvar a pauta.");
         return;
       }
 
@@ -402,12 +444,17 @@ export default function NovaPautaPage() {
       deadline,
       editoria,
       fontes,
+      privilegedSession,
       reporterId,
       router,
+      sessionCtx,
       status,
       tituloProvisorio,
     ]
   );
+
+  const waitingInitial =
+    !sessionReady || (privilegedSession && loadingReporters);
 
   return (
     <div className="min-h-screen bg-slate-100/80">
@@ -439,21 +486,34 @@ export default function NovaPautaPage() {
               Formulário de nova pauta
             </h2>
 
-            {loadingReporters && (
+            {waitingInitial && (
               <p className="text-center text-sm text-slate-600" role="status">
-                Carregando repórteres...
+                Carregando…
               </p>
             )}
 
-            {!loadingReporters && erroReporters && (
+            {sessionReady && sessionError && (
               <p className="text-center text-sm text-red-700" role="alert">
-                {erroReporters}
+                {sessionError}
               </p>
             )}
 
-            {!loadingReporters && !erroReporters && (
+            {sessionReady &&
+              !sessionError &&
+              !waitingInitial &&
+              privilegedSession &&
+              erroReporters && (
+                <p className="text-center text-sm text-red-700" role="alert">
+                  {erroReporters}
+                </p>
+              )}
+
+            {sessionReady &&
+              !sessionError &&
+              !waitingInitial &&
+              !(privilegedSession && erroReporters) && (
               <form className="space-y-4" onSubmit={handleCriarPauta}>
-                {reporters.length === 0 && (
+                {privilegedSession && reporters.length === 0 && (
                   <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     Nenhum repórter encontrado na tabela de usuários. Cadastre
                     usuários no Supabase para poder criar pautas.
@@ -498,29 +558,35 @@ export default function NovaPautaPage() {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label
-                    htmlFor="reporter-id"
-                    className="block text-sm font-medium text-slate-700"
-                  >
-                    Repórter
-                  </label>
-                  <select
-                    id="reporter-id"
-                    name="reporter_id"
-                    value={reporterId}
-                    onChange={(ev) => setReporterId(ev.target.value)}
-                    required
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                  >
-                    <option value="">Selecione o repórter</option>
-                    {reporters.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.nome?.trim() || "Sem nome"}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {privilegedSession ? (
+                  <div>
+                    <label
+                      htmlFor="reporter-id"
+                      className="block text-sm font-medium text-slate-700"
+                    >
+                      Repórter
+                    </label>
+                    <select
+                      id="reporter-id"
+                      name="reporter_id"
+                      value={reporterId}
+                      onChange={(ev) => setReporterId(ev.target.value)}
+                      required
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    >
+                      <option value="">Selecione o repórter</option>
+                      {reporters.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.nome?.trim() || "Sem nome"}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-600">
+                    Esta pauta será atribuída a você como repórter.
+                  </p>
+                )}
                 <div>
                   <label
                     htmlFor="deadline-nova"
@@ -655,7 +721,13 @@ export default function NovaPautaPage() {
                 <div className="flex flex-wrap gap-3 pt-2">
                   <button
                     type="submit"
-                    disabled={salvandoPauta || reporters.length === 0 || uploadBusy}
+                    disabled={
+                      salvandoPauta ||
+                      uploadBusy ||
+                      (privilegedSession &&
+                        (reporters.length === 0 || !reporterId.trim())) ||
+                      (!privilegedSession && !sessionCtx?.userId)
+                    }
                     className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {salvandoPauta ? "Salvando…" : "Salvar"}

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -13,6 +14,19 @@ import {
   type ReactNode,
 } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
+import {
+  canUserEditOrDeletePauta,
+  isEditorRole,
+  isSuperAdminEmail,
+} from "@/lib/admin-acl";
+import {
+  createPautaAction,
+  deletePautasAction,
+  getPautaSessionAction,
+  listPautasDashboardAction,
+  updatePautaAction,
+} from "@/app/actions/pautas";
+import { PAUTA_ACCESS_DENIED } from "@/lib/pautas-shared";
 import {
   deadlineYmdSortKey,
   formatDeadlinePtBR,
@@ -43,6 +57,7 @@ type PautaRow = {
   editoria: string | null;
   deadline: string | null;
   status: string | null;
+  reporter_id: string | null;
   reporter: { nome: string | null } | null;
 };
 
@@ -266,6 +281,7 @@ function PautasCalendar({
   controlsContent,
   onDayClick,
   onEscalaCardClick,
+  canManageDeadlineForPauta,
 }: {
   scope: "month" | "week";
   monthAnchor: Date;
@@ -280,6 +296,7 @@ function PautasCalendar({
   controlsContent?: ReactNode;
   onDayClick?: (dayYmd: string) => void;
   onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
+  canManageDeadlineForPauta?: (p: PautaRow) => boolean;
 }) {
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
@@ -459,15 +476,17 @@ function PautasCalendar({
 
   const renderPautaList = (dayKey: string, listClassName: string) => (
     <ul className={listClassName}>
-      {(pautasPorDia.get(dayKey) ?? []).map((p) => (
+      {(pautasPorDia.get(dayKey) ?? []).map((p) => {
+        const canDrag = canManageDeadlineForPauta?.(p) ?? false;
+        return (
         <li key={p.id}>
           <Link
             href={`/pauta/${p.id}`}
             data-pauta-id={p.id}
-            draggable
-            onDragStart={handleDragStartCard}
-            onDragEnd={handleDragEndCard}
-            className={`${statusCalendarChipClass(p.status)} cursor-grab active:cursor-grabbing`}
+            draggable={canDrag}
+            onDragStart={canDrag ? handleDragStartCard : undefined}
+            onDragEnd={canDrag ? handleDragEndCard : undefined}
+            className={`${statusCalendarChipClass(p.status)} ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
           >
             <span className="line-clamp-2">
               {p.titulo_provisorio?.trim() || "Sem título"}
@@ -480,7 +499,8 @@ function PautasCalendar({
             </span>
           </Link>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 
@@ -702,6 +722,7 @@ function StatusInlineSelect({
 }
 
 export function PautasDashboard() {
+  const router = useRouter();
   const [pautas, setPautas] = useState<PautaRow[]>([]);
   const [escalas, setEscalas] = useState<EscalaRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -715,6 +736,12 @@ export function PautasDashboard() {
   const [deadlineSavingId, setDeadlineSavingId] = useState<string | null>(null);
   const [excluindo, setExcluindo] = useState(false);
   const [feedbackErro, setFeedbackErro] = useState<string | null>(null);
+  const [sessionCtx, setSessionCtx] = useState<{
+    userId: string;
+    email: string;
+    nome: string | null;
+    funcao: string | null;
+  } | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const [viewMode, setViewMode] = useState<"lista" | "calendario">("calendario");
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -802,6 +829,28 @@ export function PautasDashboard() {
     return rows;
   }, [pautasFiltradas, sortColumn, sortDirection]);
 
+  const canManagePauta = useCallback(
+    (p: PautaRow) => {
+      if (!sessionCtx) return false;
+      return canUserEditOrDeletePauta({
+        currentUserId: sessionCtx.userId,
+        currentUserEmail: sessionCtx.email,
+        currentUserRole: sessionCtx.funcao,
+        pautaReporterId: p.reporter_id,
+      });
+    },
+    [sessionCtx]
+  );
+
+  const privilegedSession = useMemo(
+    () =>
+      sessionCtx
+        ? isSuperAdminEmail(sessionCtx.email) ||
+          isEditorRole(sessionCtx.funcao)
+        : false,
+    [sessionCtx]
+  );
+
   const pautasPorDia = useMemo(() => {
     const m = new Map<string, PautaRow[]>();
     for (const p of pautasFiltradas) {
@@ -819,19 +868,24 @@ export function PautasDashboard() {
     return m;
   }, [pautasFiltradas]);
 
-  const idsVisiveis = useMemo(() => sortedPautas.map((p) => p.id), [sortedPautas]);
+  const idsVisiveisGerenciaveis = useMemo(
+    () => sortedPautas.filter((p) => canManagePauta(p)).map((p) => p.id),
+    [sortedPautas, canManagePauta]
+  );
 
   useEffect(() => {
     const el = selectAllRef.current;
     if (!el) return;
-    const n = idsVisiveis.length;
+    const n = idsVisiveisGerenciaveis.length;
     if (n === 0) {
       el.indeterminate = false;
       return;
     }
-    const marcados = idsVisiveis.filter((id) => selecionadas.includes(id)).length;
+    const marcados = idsVisiveisGerenciaveis.filter((id) =>
+      selecionadas.includes(id)
+    ).length;
     el.indeterminate = marcados > 0 && marcados < n;
-  }, [idsVisiveis, selecionadas]);
+  }, [idsVisiveisGerenciaveis, selecionadas]);
 
   useEffect(() => {
     setSelecionadas((prev) => prev.filter((id) => pautas.some((p) => p.id === id)));
@@ -863,20 +917,8 @@ export function PautasDashboard() {
       return;
     }
     const supabase = createBrowserClient();
-    const [pRes, eRes] = await Promise.all([
-      supabase
-        .from("pautas")
-        .select(
-          `
-        id,
-        titulo_provisorio,
-        editoria,
-        deadline,
-        status,
-        reporter:usuarios!pautas_reporter_id_fkey(nome)
-      `
-        )
-        .order("deadline", { ascending: true, nullsFirst: false }),
+    const [pautaResult, eRes] = await Promise.all([
+      listPautasDashboardAction(),
       supabase
         .from("escalas")
         .select(
@@ -894,12 +936,12 @@ export function PautasDashboard() {
         .order("data_inicio", { ascending: true }),
     ]);
 
-    if (pRes.error) {
-      setError(pRes.error.message || "Não foi possível carregar as pautas.");
+    if (!pautaResult.ok) {
+      setError(pautaResult.error || "Não foi possível carregar as pautas.");
       setPautas([]);
       setEscalas([]);
     } else {
-      setPautas((pRes.data ?? []) as unknown as PautaRow[]);
+      setPautas(pautaResult.rows as PautaRow[]);
       if (eRes.error) {
         setEscalas([]);
       } else {
@@ -912,6 +954,31 @@ export function PautasDashboard() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getPautaSessionAction().then((r) => {
+      if (cancelled) return;
+      if (r.ok) {
+        setSessionCtx({
+          userId: r.userId,
+          email: r.email,
+          nome: r.nome,
+          funcao: r.funcao,
+        });
+      } else {
+        setSessionCtx(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isModalOpen || !sessionCtx || privilegedSession) return;
+    setModalReporterId(sessionCtx.userId);
+  }, [isModalOpen, sessionCtx, privilegedSession]);
 
   useEffect(() => {
     if (!isModalOpen) return;
@@ -948,18 +1015,19 @@ export function PautasDashboard() {
   }, [isModalOpen]);
 
   const todosVisiveisSelecionados =
-    idsVisiveis.length > 0 && idsVisiveis.every((id) => selecionadas.includes(id));
+    idsVisiveisGerenciaveis.length > 0 &&
+    idsVisiveisGerenciaveis.every((id) => selecionadas.includes(id));
 
   const handleToggleSelectAll = useCallback(() => {
     setSelecionadas((prev) => {
-      if (idsVisiveis.length === 0) return prev;
-      const allMarked = idsVisiveis.every((id) => prev.includes(id));
+      if (idsVisiveisGerenciaveis.length === 0) return prev;
+      const allMarked = idsVisiveisGerenciaveis.every((id) => prev.includes(id));
       if (allMarked) {
-        return prev.filter((id) => !idsVisiveis.includes(id));
+        return prev.filter((id) => !idsVisiveisGerenciaveis.includes(id));
       }
-      return [...new Set([...prev, ...idsVisiveis])];
+      return [...new Set([...prev, ...idsVisiveisGerenciaveis])];
     });
-  }, [idsVisiveis]);
+  }, [idsVisiveisGerenciaveis]);
 
   const handleToggleLinha = useCallback((id: string) => {
     setSelecionadas((prev) =>
@@ -977,18 +1045,11 @@ export function PautasDashboard() {
       return;
     }
     setFeedbackErro(null);
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url?.trim() || !key?.trim()) {
-      setFeedbackErro("Configure as variáveis de ambiente do Supabase.");
-      return;
-    }
     setExcluindo(true);
-    const supabase = createBrowserClient();
-    const { error: delErr } = await supabase.from("pautas").delete().in("id", selecionadas);
+    const delRes = await deletePautasAction(selecionadas);
     setExcluindo(false);
-    if (delErr) {
-      setFeedbackErro(delErr.message || "Não foi possível excluir as pautas.");
+    if (!delRes.ok) {
+      setFeedbackErro(delRes.error || "Não foi possível excluir as pautas.");
       return;
     }
     setSelecionadas([]);
@@ -1009,17 +1070,17 @@ export function PautasDashboard() {
         })
       );
       setStatusSavingId(id);
-      const supabase = createBrowserClient();
-      const { error: upErr } = await supabase
-        .from("pautas")
-        .update({ status: newStatus })
-        .eq("id", id);
+      const upRes = await updatePautaAction(id, { status: newStatus });
       setStatusSavingId(null);
-      if (upErr) {
+      if (!upRes.ok) {
         setPautas((ps) =>
           ps.map((p) => (p.id === id ? { ...p, status: previous } : p))
         );
-        setFeedbackErro(upErr.message || "Não foi possível atualizar o status.");
+        setFeedbackErro(
+          upRes.error === PAUTA_ACCESS_DENIED
+            ? PAUTA_ACCESS_DENIED
+            : upRes.error || "Não foi possível atualizar o status."
+        );
       }
     },
     []
@@ -1043,21 +1104,21 @@ export function PautasDashboard() {
       );
       setDeadlineSavingId(pautaId);
 
-      const supabase = createBrowserClient();
-      const { error: upErr } = await supabase
-        .from("pautas")
-        .update({ deadline: ymd })
-        .eq("id", pautaId);
+      const upRes = await updatePautaAction(pautaId, { deadline: ymd });
 
       setDeadlineSavingId(null);
 
-      if (upErr) {
+      if (!upRes.ok) {
         setPautas((ps) =>
           ps.map((p) =>
             p.id === pautaId ? { ...p, deadline: previousDeadline } : p
           )
         );
-        setFeedbackErro(upErr.message || "Não foi possível atualizar o prazo.");
+        setFeedbackErro(
+          upRes.error === PAUTA_ACCESS_DENIED
+            ? PAUTA_ACCESS_DENIED
+            : upRes.error || "Não foi possível atualizar o prazo."
+        );
       }
     },
     [pautas]
@@ -1076,19 +1137,19 @@ export function PautasDashboard() {
         ps.map((p) => (p.id === pautaId ? { ...p, deadline: targetYmd } : p))
       );
 
-      const supabase = createBrowserClient();
-      const { error: upErr } = await supabase
-        .from("pautas")
-        .update({ deadline: targetYmd })
-        .eq("id", pautaId);
+      const upRes = await updatePautaAction(pautaId, { deadline: targetYmd });
 
-      if (upErr) {
+      if (!upRes.ok) {
         setPautas((ps) =>
           ps.map((p) =>
             p.id === pautaId ? { ...p, deadline: previousDeadline } : p
           )
         );
-        setFeedbackErro(upErr.message || "Não foi possível atualizar o prazo.");
+        setFeedbackErro(
+          upRes.error === PAUTA_ACCESS_DENIED
+            ? PAUTA_ACCESS_DENIED
+            : upRes.error || "Não foi possível atualizar o prazo."
+        );
       }
     },
     [pautas]
@@ -1189,31 +1250,30 @@ export function PautasDashboard() {
         setModalError("Informe o título.");
         return;
       }
-      if (!modalReporterId.trim()) {
+      if (privilegedSession && !modalReporterId.trim()) {
         setModalError("Selecione um repórter.");
         return;
       }
-      setModalError(null);
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url?.trim() || !key?.trim()) {
-        setModalError("Configure as variáveis de ambiente do Supabase.");
+      if (!privilegedSession && !sessionCtx?.userId) {
+        setModalError("Sessão inválida. Atualize a página e tente novamente.");
         return;
       }
+      setModalError(null);
       setModalSaving(true);
-      const supabase = createBrowserClient();
-      const { error: insertErr } = await supabase.from("pautas").insert({
+      const insertRes = await createPautaAction({
         titulo_provisorio: titulo,
         fontes: modalResumo.trim() || null,
         deadline: selectedDate,
-        reporter_id: modalReporterId.trim(),
+        reporter_id: privilegedSession
+          ? modalReporterId.trim()
+          : sessionCtx!.userId,
         editoria: modalEditoria,
         status: "Sugerida",
         arquivos_urls: [],
       });
       setModalSaving(false);
-      if (insertErr) {
-        setModalError(insertErr.message || "Não foi possível salvar a pauta.");
+      if (!insertRes.ok) {
+        setModalError(insertRes.error || "Não foi possível salvar a pauta.");
         return;
       }
       closeNovaPautaModal();
@@ -1226,7 +1286,9 @@ export function PautasDashboard() {
       modalReporterId,
       modalResumo,
       modalTitulo,
+      privilegedSession,
       selectedDate,
+      sessionCtx,
     ]
   );
 
@@ -1369,9 +1431,18 @@ export function PautasDashboard() {
             {process.env.NEXT_PUBLIC_TITULO_DASHBOARD || "Painel de Pautas"}
             </h1>
           </Link>
-          <p className="mt-2 text-sm text-slate-600">
-            Acompanhe prazos e status das suas pautas.
-          </p>
+          {sessionCtx ? (
+            <p className="mt-2 text-sm">
+              <Link
+                href={`/admin?editar=${encodeURIComponent(sessionCtx.userId)}`}
+                className="font-medium text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+              >
+                {(sessionCtx.nome ?? "").trim() ||
+                  sessionCtx.email ||
+                  "Meu cadastro"}
+              </Link>
+            </p>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
           <Link
@@ -1488,9 +1559,9 @@ export function PautasDashboard() {
                         type="checkbox"
                         checked={todosVisiveisSelecionados}
                         onChange={handleToggleSelectAll}
-                        disabled={sortedPautas.length === 0}
+                        disabled={idsVisiveisGerenciaveis.length === 0}
                         className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        aria-label="Selecionar todas as pautas visíveis"
+                        aria-label="Selecionar todas as pautas visíveis que você pode excluir"
                       />
                     </th>
                     <SortColumnHeader
@@ -1541,13 +1612,17 @@ export function PautasDashboard() {
                       className="hover:bg-slate-50/80"
                     >
                       <td className="whitespace-nowrap px-3 py-4 sm:px-4">
-                        <input
-                          type="checkbox"
-                          checked={selecionadas.includes(p.id)}
-                          onChange={() => handleToggleLinha(p.id)}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          aria-label={`Selecionar pauta ${p.titulo_provisorio?.trim() || "sem título"}`}
-                        />
+                        {canManagePauta(p) ? (
+                          <input
+                            type="checkbox"
+                            checked={selecionadas.includes(p.id)}
+                            onChange={() => handleToggleLinha(p.id)}
+                            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            aria-label={`Selecionar pauta ${p.titulo_provisorio?.trim() || "sem título"}`}
+                          />
+                        ) : (
+                          <span className="inline-block w-4" aria-hidden />
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-slate-700 sm:px-6">
                         {reporterNome(p)}
@@ -1566,20 +1641,32 @@ export function PautasDashboard() {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-slate-700 sm:px-6">
-                        <DeadlineInlineInput
-                          pautaId={p.id}
-                          deadline={p.deadline}
-                          saving={deadlineSavingId === p.id}
-                          onChange={handleDeadlineChange}
-                        />
+                        {canManagePauta(p) ? (
+                          <DeadlineInlineInput
+                            pautaId={p.id}
+                            deadline={p.deadline}
+                            saving={deadlineSavingId === p.id}
+                            onChange={handleDeadlineChange}
+                          />
+                        ) : (
+                          <span className="text-sm tabular-nums text-slate-600">
+                            {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
+                          </span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 sm:px-6">
-                        <StatusInlineSelect
-                          pautaId={p.id}
-                          status={p.status}
-                          saving={statusSavingId === p.id}
-                          onChange={handleStatusChange}
-                        />
+                        {canManagePauta(p) ? (
+                          <StatusInlineSelect
+                            pautaId={p.id}
+                            status={p.status}
+                            saving={statusSavingId === p.id}
+                            onChange={handleStatusChange}
+                          />
+                        ) : (
+                          <span className="text-sm text-slate-700">
+                            {(p.status ?? "").trim() || "—"}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1595,13 +1682,15 @@ export function PautasDashboard() {
                 className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
               >
                 <div className="mb-3 flex items-center gap-3 border-b border-slate-100 pb-3">
-                  <input
-                    type="checkbox"
-                    checked={selecionadas.includes(p.id)}
-                    onChange={() => handleToggleLinha(p.id)}
-                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                    aria-label={`Selecionar pauta ${p.titulo_provisorio?.trim() || "sem título"}`}
-                  />
+                  {canManagePauta(p) ? (
+                    <input
+                      type="checkbox"
+                      checked={selecionadas.includes(p.id)}
+                      onChange={() => handleToggleLinha(p.id)}
+                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      aria-label={`Selecionar pauta ${p.titulo_provisorio?.trim() || "sem título"}`}
+                    />
+                  ) : null}
                 </div>
                 <dl className="space-y-3 text-sm">
                   <div>
@@ -1638,12 +1727,18 @@ export function PautasDashboard() {
                       Prazo
                     </dt>
                     <dd className="mt-0.5 text-slate-700">
-                      <DeadlineInlineInput
-                        pautaId={p.id}
-                        deadline={p.deadline}
-                        saving={deadlineSavingId === p.id}
-                        onChange={handleDeadlineChange}
-                      />
+                      {canManagePauta(p) ? (
+                        <DeadlineInlineInput
+                          pautaId={p.id}
+                          deadline={p.deadline}
+                          saving={deadlineSavingId === p.id}
+                          onChange={handleDeadlineChange}
+                        />
+                      ) : (
+                        <span className="text-sm tabular-nums">
+                          {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
+                        </span>
+                      )}
                     </dd>
                   </div>
                   <div>
@@ -1651,12 +1746,18 @@ export function PautasDashboard() {
                       Status
                     </dt>
                     <dd className="mt-0.5 max-w-full">
-                      <StatusInlineSelect
-                        pautaId={p.id}
-                        status={p.status}
-                        saving={statusSavingId === p.id}
-                        onChange={handleStatusChange}
-                      />
+                      {canManagePauta(p) ? (
+                        <StatusInlineSelect
+                          pautaId={p.id}
+                          status={p.status}
+                          saving={statusSavingId === p.id}
+                          onChange={handleStatusChange}
+                        />
+                      ) : (
+                        <span className="text-sm text-slate-800">
+                          {(p.status ?? "").trim() || "—"}
+                        </span>
+                      )}
                     </dd>
                   </div>
                 </dl>
@@ -1693,6 +1794,7 @@ export function PautasDashboard() {
               controlsContent={controlsLinha}
               onDayClick={handleCalendarDayClick}
               onEscalaCardClick={handleEscalaCardClick}
+              canManageDeadlineForPauta={canManagePauta}
             />
           )}
             </>
@@ -1826,49 +1928,55 @@ export function PautasDashboard() {
                       placeholder="Resumo ou notas rápidas"
                     />
                   </div>
-                  <div>
-                    <label
-                      htmlFor="modal-pauta-reporter"
-                      className="block text-sm font-medium text-slate-700"
-                    >
-                      Repórter
-                    </label>
-                    {modalReportersLoading && (
-                      <p className="mt-1 text-xs text-slate-500" role="status">
-                        Carregando repórteres…
-                      </p>
-                    )}
-                    {modalReportersError && !modalReportersLoading && (
-                      <p className="mt-1 text-xs text-red-700">
-                        {modalReportersError}
-                      </p>
-                    )}
-                    <select
-                      id="modal-pauta-reporter"
-                      value={modalReporterId}
-                      onChange={(e) => setModalReporterId(e.target.value)}
-                      disabled={
-                        modalSaving ||
-                        modalReportersLoading ||
-                        modalReporters.length === 0
-                      }
-                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
-                    >
-                      <option value="">Selecione…</option>
-                      {modalReporters.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.nome?.trim() || "Sem nome"}
-                        </option>
-                      ))}
-                    </select>
-                    {!modalReportersLoading &&
-                      !modalReportersError &&
-                      modalReporters.length === 0 && (
-                        <p className="mt-1 text-xs text-amber-800">
-                          Nenhum usuário cadastrado. Use o Admin.
+                  {privilegedSession ? (
+                    <div>
+                      <label
+                        htmlFor="modal-pauta-reporter"
+                        className="block text-sm font-medium text-slate-700"
+                      >
+                        Repórter
+                      </label>
+                      {modalReportersLoading && (
+                        <p className="mt-1 text-xs text-slate-500" role="status">
+                          Carregando repórteres…
                         </p>
                       )}
-                  </div>
+                      {modalReportersError && !modalReportersLoading && (
+                        <p className="mt-1 text-xs text-red-700">
+                          {modalReportersError}
+                        </p>
+                      )}
+                      <select
+                        id="modal-pauta-reporter"
+                        value={modalReporterId}
+                        onChange={(e) => setModalReporterId(e.target.value)}
+                        disabled={
+                          modalSaving ||
+                          modalReportersLoading ||
+                          modalReporters.length === 0
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                      >
+                        <option value="">Selecione…</option>
+                        {modalReporters.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.nome?.trim() || "Sem nome"}
+                          </option>
+                        ))}
+                      </select>
+                      {!modalReportersLoading &&
+                        !modalReportersError &&
+                        modalReporters.length === 0 && (
+                          <p className="mt-1 text-xs text-amber-800">
+                            Nenhum usuário cadastrado. Use o Admin.
+                          </p>
+                        )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-600">
+                      Esta pauta será atribuída a você como repórter.
+                    </p>
+                  )}
                   <div>
                     <label
                       htmlFor="modal-pauta-editoria"

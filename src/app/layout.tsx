@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { SignOutButton } from "@/components/SignOutButton";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,6 +29,7 @@ export default function RootLayout({
         className={`${geistSans.className} ${geistSans.variable} ${geistMono.variable} min-h-screen antialiased`}
       >
         {children}
+        <SignOutButton />
       </body>
     </html>
   );

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -12,6 +13,13 @@ import {
   type FormEvent,
 } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
+import { canUserEditOrDeletePauta } from "@/lib/admin-acl";
+import {
+  deletePautasAction,
+  getPautaSessionAction,
+  updatePautaAction,
+} from "@/app/actions/pautas";
+import { PAUTA_ACCESS_DENIED } from "@/lib/pautas-shared";
 import { parseDeadlineToYmd } from "@/lib/deadline-date";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
 
@@ -131,9 +139,11 @@ function IconDocument() {
 function ArquivoReferenciaItem({
   url,
   onRemove,
+  showRemove = true,
 }: {
   url: string;
   onRemove: () => void;
+  showRemove?: boolean;
 }) {
   const name = displayNameFromUrl(url);
   const kind = urlMediaKind(url);
@@ -144,15 +154,17 @@ function ArquivoReferenciaItem({
         <p className="min-w-0 flex-1 break-all text-sm font-medium text-slate-800">
           {name}
         </p>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50"
-          aria-label={`Remover ${name}`}
-        >
-          <IconTrash />
-          Remover
-        </button>
+        {showRemove ? (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50"
+            aria-label={`Remover ${name}`}
+          >
+            <IconTrash />
+            Remover
+          </button>
+        ) : null}
       </div>
       <div className="mt-3">
         {kind === "image" && (
@@ -225,6 +237,39 @@ export default function EditarPauta() {
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadErro, setUploadErro] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+
+  const [sessionCtx, setSessionCtx] = useState<{
+    userId: string;
+    email: string;
+    funcao: string | null;
+  } | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [rowReporterId, setRowReporterId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getPautaSessionAction().then((r) => {
+      setSessionReady(true);
+      if (r.ok) {
+        setSessionCtx({
+          userId: r.userId,
+          email: r.email,
+          funcao: r.funcao,
+        });
+      } else {
+        setSessionCtx(null);
+      }
+    });
+  }, []);
+
+  const canEditOrDelete = useMemo(() => {
+    if (!sessionCtx) return false;
+    return canUserEditOrDeletePauta({
+      currentUserId: sessionCtx.userId,
+      currentUserEmail: sessionCtx.email,
+      currentUserRole: sessionCtx.funcao,
+      pautaReporterId: rowReporterId,
+    });
+  }, [sessionCtx, rowReporterId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -300,6 +345,7 @@ export default function EditarPauta() {
       setArquivosUrls(normalizeArquivosUrls(row.arquivos_urls));
       setEditoria(row.editoria?.trim() || "Últimas Notícias");
       setReporterId(row.reporter_id?.trim() ?? "");
+      setRowReporterId(row.reporter_id?.trim() ? row.reporter_id.trim() : null);
       setDeadline(parseDeadlineToYmd(row.deadline) ?? "");
       setStatus(row.status?.trim() || "Sugerida");
       setLoading(false);
@@ -419,12 +465,19 @@ export default function EditarPauta() {
 
       if (!id?.trim()) return;
 
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url?.trim() || !key?.trim()) {
-        setErroForm(
-          "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no arquivo .env.local."
-        );
+      if (!sessionCtx) {
+        setErroForm("Sessão inválida. Atualize a página e tente novamente.");
+        return;
+      }
+      if (
+        !canUserEditOrDeletePauta({
+          currentUserId: sessionCtx.userId,
+          currentUserEmail: sessionCtx.email,
+          currentUserRole: sessionCtx.funcao,
+          pautaReporterId: rowReporterId,
+        })
+      ) {
+        setErroForm(PAUTA_ACCESS_DENIED);
         return;
       }
 
@@ -445,24 +498,24 @@ export default function EditarPauta() {
         : `${anoAtual}-12-31`;
 
       setSalvando(true);
-      const supabase = createBrowserClient();
-      const { error: updateErr } = await supabase
-        .from("pautas")
-        .update({
-          titulo_provisorio: titulo,
-          fontes: fontes.trim() || null,
-          arquivos_urls: arquivosUrls,
-          editoria,
-          deadline: deadlineFinal,
-          status,
-          reporter_id: reporterId.trim(),
-        })
-        .eq("id", id);
+      const updateRes = await updatePautaAction(id, {
+        titulo_provisorio: titulo,
+        fontes: fontes.trim() || null,
+        arquivos_urls: arquivosUrls,
+        editoria,
+        deadline: deadlineFinal,
+        status,
+        reporter_id: reporterId.trim(),
+      });
 
       setSalvando(false);
 
-      if (updateErr) {
-        setErroForm(updateErr.message || "Não foi possível salvar as alterações.");
+      if (!updateRes.ok) {
+        setErroForm(
+          updateRes.error === PAUTA_ACCESS_DENIED
+            ? PAUTA_ACCESS_DENIED
+            : updateRes.error || "Não foi possível salvar as alterações."
+        );
         return;
       }
 
@@ -475,7 +528,9 @@ export default function EditarPauta() {
       fontes,
       id,
       reporterId,
+      rowReporterId,
       router,
+      sessionCtx,
       status,
       tituloProvisorio,
     ]
@@ -491,26 +546,37 @@ export default function EditarPauta() {
       return;
     }
     setErroForm(null);
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url?.trim() || !key?.trim()) {
-      setErroForm(
-        "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no arquivo .env.local."
-      );
+    if (!sessionCtx) {
+      setErroForm("Sessão inválida. Atualize a página e tente novamente.");
+      return;
+    }
+    if (
+      !canUserEditOrDeletePauta({
+        currentUserId: sessionCtx.userId,
+        currentUserEmail: sessionCtx.email,
+        currentUserRole: sessionCtx.funcao,
+        pautaReporterId: rowReporterId,
+      })
+    ) {
+      setErroForm(PAUTA_ACCESS_DENIED);
       return;
     }
     setExcluindo(true);
-    const supabase = createBrowserClient();
-    const { error: delErr } = await supabase.from("pautas").delete().eq("id", id);
+    const delRes = await deletePautasAction([id]);
     setExcluindo(false);
-    if (delErr) {
-      setErroForm(delErr.message || "Não foi possível excluir a pauta.");
+    if (!delRes.ok) {
+      setErroForm(
+        delRes.error === PAUTA_ACCESS_DENIED
+          ? PAUTA_ACCESS_DENIED
+          : delRes.error || "Não foi possível excluir a pauta."
+      );
       return;
     }
     router.push("/");
-  }, [id, router]);
+  }, [id, rowReporterId, router, sessionCtx]);
 
   const formularioPronto = !loading && !erroCarregamento;
+  const editable = sessionReady && canEditOrDelete;
 
   return (
     <div className="min-h-screen bg-slate-100/80">
@@ -550,6 +616,12 @@ export default function EditarPauta() {
 
             {formularioPronto && (
               <form className="space-y-4" onSubmit={handleSubmit}>
+                {sessionReady && !canEditOrDelete && (
+                  <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    Você pode consultar os dados desta pauta, mas não possui
+                    permissão para alterá-la ou excluí-la.
+                  </p>
+                )}
                 {reporters.length === 0 && (
                   <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                     Nenhum repórter encontrado. Cadastre usuários no Supabase.
@@ -568,8 +640,9 @@ export default function EditarPauta() {
                     type="text"
                     value={tituloProvisorio}
                     onChange={(ev) => setTituloProvisorio(ev.target.value)}
+                    readOnly={!editable}
                     required
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 read-only:bg-slate-50 read-only:text-slate-700"
                     placeholder="Ex.: Entrevista com o prefeito"
                   />
                 </div>
@@ -585,7 +658,8 @@ export default function EditarPauta() {
                     name="editoria"
                     value={editoria}
                     onChange={(ev) => setEditoria(ev.target.value)}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    disabled={!editable}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                   >
                     {EDITORIA_OPTIONS.map((opt) => (
                       <option key={opt} value={opt}>
@@ -607,8 +681,8 @@ export default function EditarPauta() {
                     value={reporterId}
                     onChange={(ev) => setReporterId(ev.target.value)}
                     required
-                    disabled={reporters.length === 0}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50"
+                    disabled={!editable || reporters.length === 0}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                   >
                     <option value="">Selecione o repórter</option>
                     {reporters.map((r) => (
@@ -631,7 +705,8 @@ export default function EditarPauta() {
                     type="date"
                     value={deadline}
                     onChange={(ev) => setDeadline(ev.target.value)}
-                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    readOnly={!editable}
+                    className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 read-only:bg-slate-50"
                   />
                   <p className="mt-1 text-xs text-slate-500">
                     Opcional. Se vazio, será usado 31/12 do ano atual.
@@ -649,9 +724,10 @@ export default function EditarPauta() {
                     name="fontes"
                     value={fontes}
                     onChange={(ev) => setFontes(ev.target.value)}
+                    readOnly={!editable}
                     rows={4}
                     placeholder="Fontes e links"
-                    className="mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    className="mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 read-only:bg-slate-50"
                   />
                 </div>
 
@@ -671,33 +747,39 @@ export default function EditarPauta() {
                     onChange={handleFileInputChange}
                     className="sr-only"
                     id="arquivos-referencia-input"
-                    disabled={uploadBusy}
+                    disabled={uploadBusy || !editable}
                     aria-label="Selecionar arquivos de referência"
                   />
                   <div
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
+                    onDragOver={editable ? handleDragOver : undefined}
+                    onDragLeave={editable ? handleDragLeave : undefined}
+                    onDrop={editable ? handleDrop : undefined}
                     className={`mt-3 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors ${
                       dragActive
                         ? "border-slate-500 bg-slate-100"
                         : "border-slate-300 bg-white"
-                    } ${uploadBusy ? "pointer-events-none opacity-60" : ""}`}
+                    } ${uploadBusy || !editable ? "pointer-events-none opacity-60" : ""}`}
                   >
                     <p className="text-sm font-medium text-slate-700">
-                      Arraste arquivos aqui
+                      {editable
+                        ? "Arraste arquivos aqui"
+                        : "Upload disponível apenas para quem pode editar a pauta."}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Vários arquivos de uma vez
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploadBusy}
-                      className="mt-4 inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:opacity-60"
-                    >
-                      Selecionar arquivos
-                    </button>
+                    {editable && (
+                      <p className="mt-1 text-xs text-slate-500">
+                        Vários arquivos de uma vez
+                      </p>
+                    )}
+                    {editable && (
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploadBusy}
+                        className="mt-4 inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:opacity-60"
+                      >
+                        Selecionar arquivos
+                      </button>
+                    )}
                   </div>
                   {uploadBusy && (
                     <p className="mt-2 text-center text-xs text-slate-600" role="status">
@@ -716,6 +798,7 @@ export default function EditarPauta() {
                           key={`${u}-${i}`}
                           url={u}
                           onRemove={() => removeArquivoAt(i)}
+                          showRemove={editable}
                         />
                       ))}
                     </ul>
@@ -734,7 +817,8 @@ export default function EditarPauta() {
                     name="status"
                     value={status}
                     onChange={(ev) => setStatus(ev.target.value)}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    disabled={!editable}
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                   >
                     {STATUS_OPTIONS.map(({ value, label }) => (
                       <option key={value} value={value}>
@@ -749,18 +833,20 @@ export default function EditarPauta() {
                   </p>
                 )}
                 <div className="flex flex-wrap gap-3 pt-2">
-                  <button
-                    type="submit"
-                    disabled={
-                      salvando ||
-                      excluindo ||
-                      reporters.length === 0 ||
-                      uploadBusy
-                    }
-                    className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {salvando ? "Salvando…" : "Salvar"}
-                  </button>
+                  {canEditOrDelete ? (
+                    <button
+                      type="submit"
+                      disabled={
+                        salvando ||
+                        excluindo ||
+                        reporters.length === 0 ||
+                        uploadBusy
+                      }
+                      className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {salvando ? "Salvando…" : "Salvar"}
+                    </button>
+                  ) : null}
                   <Link
                     href="/"
                     className="inline-flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
@@ -768,19 +854,21 @@ export default function EditarPauta() {
                     Cancelar
                   </Link>
                 </div>
-                <div className="mt-6 border-t border-slate-200 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => void handleExcluir()}
-                    disabled={salvando || excluindo || uploadBusy}
-                    className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 shadow-sm transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {excluindo ? "Excluindo…" : "Excluir pauta"}
-                  </button>
-                  <p className="mt-2 text-xs text-slate-500">
-                    Remove o registro do painel. Não é possível desfazer.
-                  </p>
-                </div>
+                {canEditOrDelete ? (
+                  <div className="mt-6 border-t border-slate-200 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => void handleExcluir()}
+                      disabled={salvando || excluindo || uploadBusy}
+                      className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 shadow-sm transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {excluindo ? "Excluindo…" : "Excluir pauta"}
+                    </button>
+                    <p className="mt-2 text-xs text-slate-500">
+                      Remove o registro do painel. Não é possível desfazer.
+                    </p>
+                  </div>
+                ) : null}
               </form>
             )}
           </section>

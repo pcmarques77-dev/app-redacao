@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useState, type FormEvent } from "react";
 import { createBrowserClient } from "@/lib/supabase/client";
@@ -15,12 +16,14 @@ export function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [erro, setErro] = useState<string | null>(null);
+  const [erroCredencial, setErroCredencial] = useState(false);
   const [carregando, setCarregando] = useState(false);
 
   const handleSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
       e.preventDefault();
       setErro(null);
+      setErroCredencial(false);
       const em = email.trim();
       if (!em) {
         setErro("Informe o e-mail.");
@@ -47,7 +50,19 @@ export function LoginForm() {
       setCarregando(false);
 
       if (error) {
-        setErro(error.message || "Não foi possível entrar.");
+        const msg = error.message ?? "";
+        if (
+          msg.includes("Database error") ||
+          msg.toLowerCase().includes("internal server error")
+        ) {
+          setErroCredencial(false);
+          setErro(
+            "O servidor de autenticação falhou ao carregar a conta (erro na base de dados). Isto costuma ser trigger ou hook em Auth a apontar para public.usuarios, ou políticas RLS. Consulte os logs em Supabase → Logs → Auth / Postgres."
+          );
+          return;
+        }
+        setErroCredencial(true);
+        setErro("E-mail ou senha incorretos.");
         return;
       }
 
@@ -121,7 +136,11 @@ export function LoginForm() {
 
             {erro && (
               <p
-                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                className={
+                  erroCredencial
+                    ? "rounded-lg border border-red-100 bg-red-50/90 px-3 py-2 text-center text-sm text-red-600"
+                    : "rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800"
+                }
                 role="alert"
               >
                 {erro}
@@ -136,6 +155,25 @@ export function LoginForm() {
             >
               {carregando ? "Entrando…" : "Entrar"}
             </button>
+
+            <div className="space-y-2 pt-1 text-center text-xs text-slate-500">
+              <p>
+                <Link
+                  href="/esqueci-senha"
+                  className="text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline"
+                >
+                  Esqueceu sua senha? Clique aqui para redefinir
+                </Link>
+              </p>
+              <p>
+                <Link
+                  href="/esqueci-senha"
+                  className="text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline"
+                >
+                  Primeiro acesso? Clique aqui para escolher uma nova senha
+                </Link>
+              </p>
+            </div>
           </form>
         </div>
       </div>

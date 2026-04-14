@@ -12,6 +12,9 @@ export default function RondaRssPage() {
       autoLoadOnMount
       atualizarLabel="Atualizar Radar de Pautas"
       tituloEhLink
+      showHeaderDescription={false}
+      showMainNavRow
+      mainNavSecondIsAdmin
     />
   );
 }

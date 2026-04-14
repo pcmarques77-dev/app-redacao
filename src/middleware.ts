@@ -63,6 +63,10 @@ export async function middleware(request: NextRequest) {
 
   const path = request.nextUrl.pathname;
   const isLogin = path === "/login";
+  const isPublicAuth =
+    isLogin ||
+    path === "/esqueci-senha" ||
+    path === "/atualizar-senha";
 
   const isProtected =
     path === "/" ||
@@ -87,7 +91,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (!user && isProtected && !isLogin) {
+  if (!user && isProtected && !isPublicAuth) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("next", path);

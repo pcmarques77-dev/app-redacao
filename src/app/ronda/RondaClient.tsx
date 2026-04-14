@@ -49,6 +49,12 @@ type RondaClientProps = {
   atualizarLabel?: string;
   /** Se true, o título do card abre a matéria (sem botão “Ler Matéria”). */
   tituloEhLink?: boolean;
+  /** Parágrafo explicativo sob o título (ex.: /ronda-rss sem texto). */
+  showHeaderDescription?: boolean;
+  /** Barra Calendário / Radar de Pautas / Escala / Nova Pauta (como no Admin). */
+  showMainNavRow?: boolean;
+  /** Com `showMainNavRow`, troca o 2.º link para Admin em vez de Radar de Pautas. */
+  mainNavSecondIsAdmin?: boolean;
 };
 
 export function RondaClient({
@@ -57,6 +63,9 @@ export function RondaClient({
   autoLoadOnMount = false,
   atualizarLabel = "Atualizar Ronda",
   tituloEhLink = false,
+  showHeaderDescription = true,
+  showMainNavRow = false,
+  mainNavSecondIsAdmin = false,
 }: RondaClientProps) {
   const [noticias, setNoticias] = useState<NoticiaRonda[]>([]);
   const [jaBuscou, setJaBuscou] = useState(false);
@@ -114,19 +123,50 @@ export function RondaClient({
             <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
               {pageTitle}
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-600">
-              Exibindo as 10 notícias mais recentes de cada fonte oficial,
-              ordenadas pela data de publicação no site (quando disponível).
-              Itens sem data na listagem vão ao fim, pela ordem da captura.
-              Pente-fino manual, sem IA.
-            </p>
+            {showHeaderDescription ? (
+              <p className="mt-2 max-w-2xl text-sm text-slate-600">
+                Exibindo as 10 notícias mais recentes de cada fonte oficial,
+                ordenadas pela data de publicação no site (quando disponível).
+                Itens sem data na listagem vão ao fim, pela ordem da captura.
+                Pente-fino manual, sem IA.
+              </p>
+            ) : null}
           </div>
-          <Link
-            href="/"
-            className="inline-flex shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            ← Painel de pautas
-          </Link>
+          {showMainNavRow ? (
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+              <Link
+                href="/"
+                className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+              >
+                Calendário
+              </Link>
+              <Link
+                href={mainNavSecondIsAdmin ? "/admin" : "/ronda-rss"}
+                className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+              >
+                {mainNavSecondIsAdmin ? "Admin" : "Radar de Pautas"}
+              </Link>
+              <Link
+                href="/escala"
+                className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+              >
+                Escala
+              </Link>
+              <Link
+                href="/nova-pauta"
+                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+              >
+                Nova Pauta
+              </Link>
+            </div>
+          ) : (
+            <Link
+              href="/"
+              className="inline-flex shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              ← Painel de pautas
+            </Link>
+          )}
         </header>
 
         <div className="mb-8">

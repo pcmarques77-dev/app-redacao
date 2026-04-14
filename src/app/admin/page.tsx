@@ -6,6 +6,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -15,6 +16,7 @@ import {
   updateUsuariosRowAction,
   type UsuarioTableRow,
 } from "@/app/actions/admin";
+import { isEditorRole, isSuperAdminEmail } from "@/lib/admin-acl";
 import { createBrowserClient } from "@/lib/supabase/client";
 
 function isoToDatetimeLocalValue(iso: string | null): string {
@@ -45,6 +47,48 @@ function PencilIcon() {
   );
 }
 
+function IconEyeOpen() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconEyeOff() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <line x1="2" x2="22" y1="2" y2="22" />
+    </svg>
+  );
+}
+
 function AdminUsuariosPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -52,6 +96,10 @@ function AdminUsuariosPageContent() {
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const [currentUserRole, setCurrentUserRole] = useState("");
+  const [authHydrated, setAuthHydrated] = useState(false);
+  const processedEditarParamRef = useRef<string | null>(null);
 
   const [banner, setBanner] = useState<{
     type: "ok" | "err";
@@ -62,6 +110,8 @@ function AdminUsuariosPageContent() {
   const [editNome, setEditNome] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editFuncao, setEditFuncao] = useState("");
+  const [editSenha, setEditSenha] = useState("");
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [editDataCriacao, setEditDataCriacao] = useState("");
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
 
@@ -93,22 +143,88 @@ function AdminUsuariosPageContent() {
 
   useEffect(() => {
     const supabase = createBrowserClient();
-    void supabase.auth.getUser().then(({ data }) => {
-      setCurrentUserId(data.user?.id ?? null);
-    });
+    void (async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const uid = user?.id ?? null;
+        const email = (user?.email ?? "").trim().toLowerCase();
+        setCurrentUserId(uid);
+        setCurrentUserEmail(email);
+        if (uid) {
+          const { data: row } = await supabase
+            .from("usuarios")
+            .select("funcao")
+            .eq("id", uid)
+            .maybeSingle();
+          setCurrentUserRole(row?.funcao?.trim() ?? "");
+        } else {
+          setCurrentUserRole("");
+        }
+      } finally {
+        setAuthHydrated(true);
+      }
+    })();
   }, []);
+
+  const isSuperUi = isSuperAdminEmail(currentUserEmail);
+  const canCreateUser = isSuperUi || isEditorRole(currentUserRole);
+  const canEditRow = (r: UsuarioTableRow) =>
+    isSuperUi || r.id === currentUserId;
 
   const openEdit = useCallback((row: UsuarioTableRow) => {
     setEditing(row);
     setEditNome(row.nome?.trim() ?? "");
     setEditEmail(row.email?.trim() ?? "");
     setEditFuncao(row.funcao?.trim() ?? "");
+    setEditSenha("");
+    setMostrarSenha(false);
     setEditDataCriacao(isoToDatetimeLocalValue(row.data_criacao));
     setBanner(null);
   }, []);
 
+  useEffect(() => {
+    const raw = searchParams.get("editar");
+    const id = raw?.trim() ?? "";
+    if (!id) {
+      processedEditarParamRef.current = null;
+      return;
+    }
+    if (!authHydrated || loadingList || listError) return;
+    if (processedEditarParamRef.current === id) return;
+    const row = rows.find((r) => r.id === id);
+    if (!row) return;
+
+    const canOpen = isSuperUi || row.id === currentUserId;
+    if (!canOpen) {
+      processedEditarParamRef.current = id;
+      setBanner({
+        type: "err",
+        text: "Você não pode editar este usuário.",
+      });
+      router.replace("/admin", { scroll: false });
+      return;
+    }
+
+    processedEditarParamRef.current = id;
+    openEdit(row);
+    router.replace("/admin", { scroll: false });
+  }, [
+    authHydrated,
+    searchParams,
+    rows,
+    loadingList,
+    listError,
+    currentUserId,
+    isSuperUi,
+    openEdit,
+    router,
+  ]);
+
   const closeEdit = useCallback(() => {
     if (salvandoEdicao || deletingId) return;
+    setMostrarSenha(false);
     setEditing(null);
   }, [salvandoEdicao, deletingId]);
 
@@ -116,6 +232,7 @@ function AdminUsuariosPageContent() {
     if (!editing) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !salvandoEdicao && !deletingId) {
+        setMostrarSenha(false);
         setEditing(null);
       }
     };
@@ -134,6 +251,7 @@ function AdminUsuariosPageContent() {
         email: editEmail,
         funcao: editFuncao,
         data_criacao: editDataCriacao,
+        senha: editSenha,
       });
       setSalvandoEdicao(false);
       if (!res.ok) {
@@ -141,17 +259,18 @@ function AdminUsuariosPageContent() {
         return;
       }
       setBanner({ type: "ok", text: "Registro atualizado." });
+      setMostrarSenha(false);
       setEditing(null);
       void refreshRows();
     },
-    [editing, editNome, editEmail, editFuncao, editDataCriacao, refreshRows]
+    [editing, editNome, editEmail, editFuncao, editSenha, editDataCriacao, refreshRows]
   );
 
   const handleExcluir = useCallback(
     async (row: UsuarioTableRow) => {
       if (
         !window.confirm(
-          "Remover esta linha de public.usuarios? Isso não remove o usuário do Authentication."
+          "Tem certeza que deseja excluir este usuário permanentemente? O acesso dele ao sistema será revogado imediatamente."
         )
       ) {
         return;
@@ -164,8 +283,11 @@ function AdminUsuariosPageContent() {
         setBanner({ type: "err", text: res.error });
         return;
       }
-      setBanner({ type: "ok", text: "Registro removido da tabela." });
-      if (editing?.id === row.id) setEditing(null);
+      setBanner({ type: "ok", text: "Usuário excluído." });
+      if (editing?.id === row.id) {
+        setMostrarSenha(false);
+        setEditing(null);
+      }
       void refreshRows();
     },
     [editing?.id, refreshRows]
@@ -179,22 +301,31 @@ function AdminUsuariosPageContent() {
             <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
               Admin
             </h1>
-            <p className="mt-0.5 max-w-2xl text-xs text-slate-600 sm:text-sm">
-              Cadastro direto em{" "}
-              <code className="rounded bg-slate-200/80 px-1 text-xs">
-                public.usuarios
-              </code>
-              : criar, listar, editar e excluir linhas. Contas em Authentication
-              não são criadas nem apagadas por aqui; você pode alinhar o Auth
-              depois a partir destes dados.
-            </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             <Link
               href="/"
-              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
             >
-              Voltar ao painel
+              Calendário
+            </Link>
+            <Link
+              href="/ronda-rss"
+              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            >
+              Radar de Pautas
+            </Link>
+            <Link
+              href="/escala"
+              className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+            >
+              Escala
+            </Link>
+            <Link
+              href="/nova-pauta"
+              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+            >
+              Nova Pauta
             </Link>
           </div>
         </header>
@@ -219,12 +350,14 @@ function AdminUsuariosPageContent() {
                 <h2 className="text-sm font-semibold text-slate-800">
                   Usuários
                 </h2>
-                <Link
-                  href="/admin/novo-usuario"
-                  className="inline-flex items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800"
-                >
-                  Criar usuário
-                </Link>
+                {canCreateUser && (
+                  <Link
+                    href="/admin/novo-usuario"
+                    className="inline-flex items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800"
+                  >
+                    Criar usuário
+                  </Link>
+                )}
               </div>
               {loadingList && (
                 <p className="px-4 py-8 text-center text-sm text-slate-500 sm:px-5">
@@ -279,14 +412,18 @@ function AdminUsuariosPageContent() {
                             </span>
                           </td>
                           <td className="px-3 py-2.5 align-middle sm:px-4">
-                            <button
-                              type="button"
-                              onClick={() => openEdit(r)}
-                              className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                            >
-                              <PencilIcon />
-                              Editar
-                            </button>
+                            {canEditRow(r) ? (
+                              <button
+                                type="button"
+                                onClick={() => openEdit(r)}
+                                className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                              >
+                                <PencilIcon />
+                                Editar
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -350,9 +487,10 @@ function AdminUsuariosPageContent() {
                   <input
                     id="edit-email"
                     type="email"
+                    disabled={!isSuperUi}
                     value={editEmail}
                     onChange={(e) => setEditEmail(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
                   />
                 </div>
                 <div>
@@ -365,10 +503,44 @@ function AdminUsuariosPageContent() {
                   <input
                     id="edit-funcao"
                     type="text"
+                    disabled={!isSuperUi}
                     value={editFuncao}
                     onChange={(e) => setEditFuncao(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
                   />
+                </div>
+                <div>
+                  <label
+                    htmlFor="edit-senha"
+                    className="block text-sm font-medium text-slate-700"
+                  >
+                    Nova Senha
+                  </label>
+                  <div className="relative mt-1">
+                    <input
+                      id="edit-senha"
+                      type={mostrarSenha ? "text" : "password"}
+                      autoComplete="new-password"
+                      value={editSenha}
+                      onChange={(e) => setEditSenha(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 py-2 pl-3 pr-10 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+                      placeholder="Opcional"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMostrarSenha(!mostrarSenha)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-500 hover:text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                      aria-label={
+                        mostrarSenha ? "Ocultar senha" : "Mostrar senha"
+                      }
+                      aria-pressed={mostrarSenha}
+                    >
+                      {mostrarSenha ? <IconEyeOff /> : <IconEyeOpen />}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Deixe em branco para manter a senha atual.
+                  </p>
                 </div>
                 <div>
                   <label
@@ -380,26 +552,33 @@ function AdminUsuariosPageContent() {
                   <input
                     id="edit-data"
                     type="datetime-local"
+                    disabled={!isSuperUi}
                     value={editDataCriacao}
                     onChange={(e) => setEditDataCriacao(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
                   />
                 </div>
               </div>
               <div className="mt-6 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <button
-                  type="button"
-                  disabled={
-                    editing.id === currentUserId ||
-                    deletingId === editing.id ||
-                    salvandoEdicao
-                  }
-                  onClick={() => void handleExcluir(editing)}
-                  className="order-2 rounded-md border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:order-1"
+                {isSuperUi ? (
+                  <button
+                    type="button"
+                    disabled={
+                      editing.id === currentUserId ||
+                      deletingId === editing.id ||
+                      salvandoEdicao
+                    }
+                    onClick={() => void handleExcluir(editing)}
+                    className="order-2 rounded-md border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 sm:order-1"
+                  >
+                    {deletingId === editing.id ? "Excluindo…" : "Excluir"}
+                  </button>
+                ) : (
+                  <span className="order-2 hidden sm:order-1 sm:block sm:flex-1" />
+                )}
+                <div
+                  className={`order-1 flex flex-wrap justify-end gap-2 sm:order-2 ${!isSuperUi ? "sm:ml-auto" : ""}`}
                 >
-                  {deletingId === editing.id ? "Excluindo…" : "Excluir"}
-                </button>
-                <div className="order-1 flex flex-wrap justify-end gap-2 sm:order-2">
                   <button
                     type="button"
                     onClick={closeEdit}
