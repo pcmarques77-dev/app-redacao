@@ -26,7 +26,11 @@ import {
   listPautasDashboardAction,
   updatePautaAction,
 } from "@/app/actions/pautas";
-import { PAUTA_ACCESS_DENIED } from "@/lib/pautas-shared";
+import {
+  PAUTA_ACCESS_DENIED,
+  coercePautaStatus,
+  type PautaStatus,
+} from "@/lib/pautas-shared";
 import {
   deadlineYmdSortKey,
   formatDeadlinePtBR,
@@ -56,9 +60,10 @@ type PautaRow = {
   titulo_provisorio: string | null;
   editoria: string | null;
   deadline: string | null;
-  status: string | null;
+  status: PautaStatus;
   reporter_id: string | null;
   reporter: { nome: string | null } | null;
+  demanda_multimidia: boolean;
 };
 
 type EscalaRow = {
@@ -253,18 +258,15 @@ function formatWeekRangeTitle(weekStart: Date): string {
   return `${a} – ${b}`;
 }
 
-function statusCalendarChipClass(status: string | null): string {
+function statusCalendarChipClass(status: PautaStatus | null): string {
   const n = normalizeStatus(status);
   const base =
     "block w-full rounded border px-1.5 py-1 text-left text-[11px] font-medium leading-snug transition hover:ring-2 hover:ring-blue-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-blue-500";
-  if (n === "aprovada") return `${base} border-emerald-300 bg-emerald-50 text-emerald-900`;
-  if (n === "em apuracao") return `${base} border-amber-300 bg-amber-50 text-amber-900`;
-  if (n === "finalizada") return `${base} border-slate-400 bg-slate-200 text-slate-900`;
-  if (n === "sugerida") return `${base} border-sky-300 bg-sky-50 text-sky-900`;
-  if (n === "redacao" || n === "revisao")
-    return `${base} border-violet-300 bg-violet-50 text-violet-900`;
-  if (n.includes("fact")) return `${base} border-orange-300 bg-orange-50 text-orange-900`;
-  return `${base} border-slate-300 bg-slate-50 text-slate-800`;
+  if (n === "sugerida") return `${base} border-slate-200 bg-slate-100 text-slate-700`;
+  if (n === "em producao") return `${base} border-amber-200 bg-amber-100 text-amber-800`;
+  if (n === "pronto") return `${base} border-emerald-200 bg-emerald-100 text-emerald-800`;
+  if (n === "publicada") return `${base} border-blue-200 bg-blue-100 text-blue-800`;
+  return `${base} border-slate-200 bg-slate-100 text-slate-700`;
 }
 
 function PautasCalendar({
@@ -281,6 +283,7 @@ function PautasCalendar({
   controlsContent,
   onDayClick,
   onEscalaCardClick,
+  onPautaChipClick,
   canManageDeadlineForPauta,
 }: {
   scope: "month" | "week";
@@ -296,6 +299,7 @@ function PautasCalendar({
   controlsContent?: ReactNode;
   onDayClick?: (dayYmd: string) => void;
   onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
+  onPautaChipClick?: (p: PautaRow) => void;
   canManageDeadlineForPauta?: (p: PautaRow) => boolean;
 }) {
   const year = monthAnchor.getFullYear();
@@ -362,7 +366,7 @@ function PautasCalendar({
     [onDropDeadline]
   );
 
-  const handleDragStartCard = useCallback((e: DragEvent<HTMLAnchorElement>) => {
+  const handleDragStartCard = useCallback((e: DragEvent<HTMLButtonElement>) => {
     const id = e.currentTarget.dataset.pautaId;
     if (id) {
       e.dataTransfer.setData("pautaId", id);
@@ -480,13 +484,19 @@ function PautasCalendar({
         const canDrag = canManageDeadlineForPauta?.(p) ?? false;
         return (
         <li key={p.id}>
-          <Link
-            href={`/pauta/${p.id}`}
+          <button
+            type="button"
+            data-pauta-calendario-chip
             data-pauta-id={p.id}
             draggable={canDrag}
             onDragStart={canDrag ? handleDragStartCard : undefined}
             onDragEnd={canDrag ? handleDragEndCard : undefined}
-            className={`${statusCalendarChipClass(p.status)} ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onPautaChipClick?.(p);
+            }}
+            className={`${statusCalendarChipClass(p.status)} w-full text-left ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
           >
             <span className="line-clamp-2">
               {p.titulo_provisorio?.trim() || "Sem título"}
@@ -497,7 +507,7 @@ function PautasCalendar({
             <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
               {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
             </span>
-          </Link>
+          </button>
         </li>
         );
       })}
@@ -512,7 +522,7 @@ function PautasCalendar({
       onClick: onDayClick
         ? (e: MouseEvent<HTMLDivElement>) => {
             const t = e.target as HTMLElement;
-            if (t.closest("a[href]")) return;
+            if (t.closest("[data-pauta-calendario-chip]")) return;
             onDayClick(dayKey);
           }
         : undefined,
@@ -648,18 +658,15 @@ function PautasCalendar({
   );
 }
 
-function statusSelectClassName(status: string | null): string {
+function statusSelectClassName(status: PautaStatus | null): string {
   const n = normalizeStatus(status);
   const base =
     "w-full min-w-[9.5rem] max-w-full rounded-md border px-2 py-1.5 text-xs font-medium shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-[12rem]";
-  if (n === "aprovada") return `${base} border-emerald-300 bg-emerald-50 text-emerald-900`;
-  if (n === "em apuracao") return `${base} border-amber-300 bg-amber-50 text-amber-900`;
-  if (n === "finalizada") return `${base} border-slate-400 bg-slate-200 text-slate-900`;
-  if (n === "sugerida") return `${base} border-sky-300 bg-sky-50 text-sky-900`;
-  if (n === "redacao" || n === "revisao")
-    return `${base} border-violet-300 bg-violet-50 text-violet-900`;
-  if (n.includes("fact")) return `${base} border-orange-300 bg-orange-50 text-orange-900`;
-  return `${base} border-slate-300 bg-slate-50 text-slate-800`;
+  if (n === "sugerida") return `${base} border-slate-200 bg-slate-100 text-slate-700`;
+  if (n === "em producao") return `${base} border-amber-200 bg-amber-100 text-amber-800`;
+  if (n === "pronto") return `${base} border-emerald-200 bg-emerald-100 text-emerald-800`;
+  if (n === "publicada") return `${base} border-blue-200 bg-blue-100 text-blue-800`;
+  return `${base} border-slate-200 bg-slate-100 text-slate-700`;
 }
 
 function DeadlineInlineInput({
@@ -693,27 +700,21 @@ function StatusInlineSelect({
   onChange,
 }: {
   pautaId: string;
-  status: string | null;
+  status: PautaStatus;
   saving: boolean;
-  onChange: (id: string, value: string) => void;
+  onChange: (id: string, value: PautaStatus) => void;
 }) {
-  const current = (status ?? "").trim() || "Sugerida";
-  const inList = STATUS_OPTIONS.some((o) => o.value === current);
+  const value = coercePautaStatus(status);
   return (
     <select
       aria-label="Alterar status da pauta"
       disabled={saving}
-      value={current}
-      onChange={(e) => onChange(pautaId, e.target.value)}
+      value={value}
+      onChange={(e) => onChange(pautaId, e.target.value as PautaStatus)}
       className={statusSelectClassName(status)}
     >
-      {!inList && (
-        <option value={current}>
-          {current}
-        </option>
-      )}
-      {STATUS_OPTIONS.map(({ value, label }) => (
-        <option key={value} value={value}>
+      {STATUS_OPTIONS.map(({ value: v, label }) => (
+        <option key={v} value={v}>
           {label}
         </option>
       ))}
@@ -773,6 +774,9 @@ export function PautasDashboard() {
   const [modalReportersError, setModalReportersError] = useState<string | null>(null);
   const [modalReporterId, setModalReporterId] = useState("");
   const [modalEditoria, setModalEditoria] = useState("Últimas Notícias");
+  const [modalDemandaMultimidia, setModalDemandaMultimidia] = useState(false);
+  const [pautaCalendarioSomenteLeitura, setPautaCalendarioSomenteLeitura] =
+    useState<PautaRow | null>(null);
   const [modalTab, setModalTab] = useState<"pauta" | "escala">("pauta");
   const [escalaFormDirty, setEscalaFormDirty] = useState(false);
   const [escalaSaving, setEscalaSaving] = useState(false);
@@ -840,6 +844,17 @@ export function PautasDashboard() {
       });
     },
     [sessionCtx]
+  );
+
+  const handleCalendarioPautaChipClick = useCallback(
+    (p: PautaRow) => {
+      if (!sessionCtx || canManagePauta(p)) {
+        router.push(`/pauta/${p.id}`);
+      } else {
+        setPautaCalendarioSomenteLeitura(p);
+      }
+    },
+    [canManagePauta, router, sessionCtx]
   );
 
   const privilegedSession = useMemo(
@@ -1057,18 +1072,14 @@ export function PautasDashboard() {
   }, [load, selecionadas]);
 
   const handleStatusChange = useCallback(
-    async (id: string, newStatus: string) => {
+    async (id: string, newStatus: PautaStatus) => {
       setFeedbackErro(null);
-      let previous: string | null = null;
-      setPautas((ps) =>
-        ps.map((p) => {
-          if (p.id === id) {
-            previous = p.status;
-            return { ...p, status: newStatus };
-          }
-          return p;
-        })
-      );
+      let previous: PautaStatus = "Sugerida";
+      setPautas((ps) => {
+        const hit = ps.find((p) => p.id === id);
+        if (hit) previous = hit.status;
+        return ps.map((p) => (p.id === id ? { ...p, status: newStatus } : p));
+      });
       setStatusSavingId(id);
       const upRes = await updatePautaAction(id, { status: newStatus });
       setStatusSavingId(null);
@@ -1162,6 +1173,7 @@ export function PautasDashboard() {
     setModalResumo("");
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
+    setModalDemandaMultimidia(false);
     setModalSaving(false);
     setModalError(null);
     setModalReportersError(null);
@@ -1176,7 +1188,8 @@ export function PautasDashboard() {
     const pautaDirty =
       modalTitulo.trim() !== "" ||
       modalResumo.trim() !== "" ||
-      modalReporterId.trim() !== "";
+      modalReporterId.trim() !== "" ||
+      modalDemandaMultimidia;
     if (pautaDirty || escalaFormDirty) {
       if (
         !window.confirm(
@@ -1193,6 +1206,7 @@ export function PautasDashboard() {
     modalTitulo,
     modalResumo,
     modalReporterId,
+    modalDemandaMultimidia,
     escalaFormDirty,
     closeNovaPautaModal,
   ]);
@@ -1208,6 +1222,17 @@ export function PautasDashboard() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [isModalOpen, requestCloseDayModal]);
 
+  useEffect(() => {
+    if (!pautaCalendarioSomenteLeitura) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setPautaCalendarioSomenteLeitura(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [pautaCalendarioSomenteLeitura]);
+
   const handleCalendarDayClick = useCallback((ymd: string) => {
     setSelectedDate(ymd);
     setEditingEscala(null);
@@ -1215,6 +1240,7 @@ export function PautasDashboard() {
     setModalResumo("");
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
+    setModalDemandaMultimidia(false);
     setModalError(null);
     setModalReportersError(null);
     setModalTab("pauta");
@@ -1231,6 +1257,7 @@ export function PautasDashboard() {
       setModalResumo("");
       setModalReporterId("");
       setModalEditoria("Últimas Notícias");
+      setModalDemandaMultimidia(false);
       setModalError(null);
       setModalReportersError(null);
       setModalTab("escala");
@@ -1270,6 +1297,7 @@ export function PautasDashboard() {
         editoria: modalEditoria,
         status: "Sugerida",
         arquivos_urls: [],
+        demanda_multimidia: modalDemandaMultimidia,
       });
       setModalSaving(false);
       if (!insertRes.ok) {
@@ -1283,6 +1311,7 @@ export function PautasDashboard() {
       closeNovaPautaModal,
       load,
       modalEditoria,
+      modalDemandaMultimidia,
       modalReporterId,
       modalResumo,
       modalTitulo,
@@ -1794,6 +1823,7 @@ export function PautasDashboard() {
               controlsContent={controlsLinha}
               onDayClick={handleCalendarDayClick}
               onEscalaCardClick={handleEscalaCardClick}
+              onPautaChipClick={handleCalendarioPautaChipClick}
               canManageDeadlineForPauta={canManagePauta}
             />
           )}
@@ -1927,6 +1957,22 @@ export function PautasDashboard() {
                       className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
                       placeholder="Resumo ou notas rápidas"
                     />
+                  </div>
+                  <div className="flex items-start gap-2 pt-0.5">
+                    <input
+                      id="modal-pauta-demanda-multimidia"
+                      type="checkbox"
+                      checked={modalDemandaMultimidia}
+                      onChange={(e) => setModalDemandaMultimidia(e.target.checked)}
+                      disabled={modalSaving}
+                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                    <label
+                      htmlFor="modal-pauta-demanda-multimidia"
+                      className="cursor-pointer text-sm text-slate-700"
+                    >
+                      Demanda Multimídia
+                    </label>
                   </div>
                   {privilegedSession ? (
                     <div>
@@ -2080,6 +2126,166 @@ export function PautasDashboard() {
                 />
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {pautaCalendarioSomenteLeitura && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setPautaCalendarioSomenteLeitura(null);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pauta-calendario-sl-title"
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2
+                id="pauta-calendario-sl-title"
+                className="text-lg font-semibold text-slate-900"
+              >
+                Pauta (somente leitura)
+              </h2>
+              <button
+                type="button"
+                onClick={() => setPautaCalendarioSomenteLeitura(null)}
+                className="shrink-0 rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+                aria-label="Fechar"
+              >
+                ×
+              </button>
+            </div>
+            <p className="mt-3 text-sm text-slate-600">
+              Você pode ver esta pauta no calendário, mas só o repórter
+              responsável, editores ou o administrador podem alterá-la.
+            </p>
+            <div className="mt-4 space-y-4">
+              <div>
+                <label
+                  htmlFor="cal-sl-titulo"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Título
+                </label>
+                <input
+                  id="cal-sl-titulo"
+                  type="text"
+                  value={
+                    pautaCalendarioSomenteLeitura.titulo_provisorio?.trim() ||
+                    "Sem título"
+                  }
+                  readOnly
+                  disabled
+                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 opacity-90"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="cal-sl-reporter"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Repórter
+                </label>
+                <input
+                  id="cal-sl-reporter"
+                  type="text"
+                  value={reporterNome(pautaCalendarioSomenteLeitura)}
+                  readOnly
+                  disabled
+                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 opacity-90"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="cal-sl-editoria"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Editoria
+                </label>
+                <input
+                  id="cal-sl-editoria"
+                  type="text"
+                  value={pautaCalendarioSomenteLeitura.editoria?.trim() || "—"}
+                  readOnly
+                  disabled
+                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 opacity-90"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="cal-sl-prazo"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Prazo
+                </label>
+                <input
+                  id="cal-sl-prazo"
+                  type="text"
+                  value={formatDeadlinePtBR(
+                    parseDeadlineToYmd(pautaCalendarioSomenteLeitura.deadline)
+                  )}
+                  readOnly
+                  disabled
+                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 opacity-90"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="cal-sl-status"
+                  className="block text-sm font-medium text-slate-700"
+                >
+                  Status
+                </label>
+                <select
+                  id="cal-sl-status"
+                  value={pautaCalendarioSomenteLeitura.status}
+                  disabled
+                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 opacity-90"
+                >
+                  {STATUS_OPTIONS.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-start gap-2 pt-0.5">
+                <input
+                  id="cal-sl-dm"
+                  type="checkbox"
+                  checked={pautaCalendarioSomenteLeitura.demanda_multimidia}
+                  readOnly
+                  disabled
+                  className="mt-0.5 h-4 w-4 shrink-0 cursor-not-allowed rounded border-slate-300 text-slate-900 opacity-90"
+                />
+                <label htmlFor="cal-sl-dm" className="text-sm text-slate-500">
+                  Demanda Multimídia
+                </label>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <Link
+                href={`/pauta/${pautaCalendarioSomenteLeitura.id}`}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+              >
+                Abrir página completa
+              </Link>
+              <button
+                type="button"
+                onClick={() => setPautaCalendarioSomenteLeitura(null)}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -19,7 +19,11 @@ import {
   getPautaSessionAction,
   updatePautaAction,
 } from "@/app/actions/pautas";
-import { PAUTA_ACCESS_DENIED } from "@/lib/pautas-shared";
+import {
+  PAUTA_ACCESS_DENIED,
+  coercePautaStatus,
+  type PautaStatus,
+} from "@/lib/pautas-shared";
 import { parseDeadlineToYmd } from "@/lib/deadline-date";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
 
@@ -228,7 +232,8 @@ export default function EditarPauta() {
   const [editoria, setEditoria] = useState("Últimas Notícias");
   const [reporterId, setReporterId] = useState("");
   const [deadline, setDeadline] = useState("");
-  const [status, setStatus] = useState("Sugerida");
+  const [status, setStatus] = useState<PautaStatus>("Sugerida");
+  const [demandaMultimidia, setDemandaMultimidia] = useState(false);
   const [arquivosUrls, setArquivosUrls] = useState<string[]>([]);
 
   const [salvando, setSalvando] = useState(false);
@@ -301,7 +306,7 @@ export default function EditarPauta() {
         supabase
           .from("pautas")
           .select(
-            "titulo_provisorio, fontes, arquivos_urls, editoria, deadline, status, reporter_id"
+            "titulo_provisorio, fontes, arquivos_urls, editoria, deadline, status, reporter_id, demanda_multimidia"
           )
           .eq("id", id)
           .maybeSingle(),
@@ -337,6 +342,7 @@ export default function EditarPauta() {
         deadline: string | null;
         status: string | null;
         reporter_id: string | null;
+        demanda_multimidia: boolean | null;
       };
 
       setReporters((repRes.data as ReporterOption[]) ?? []);
@@ -347,7 +353,8 @@ export default function EditarPauta() {
       setReporterId(row.reporter_id?.trim() ?? "");
       setRowReporterId(row.reporter_id?.trim() ? row.reporter_id.trim() : null);
       setDeadline(parseDeadlineToYmd(row.deadline) ?? "");
-      setStatus(row.status?.trim() || "Sugerida");
+      setStatus(coercePautaStatus(row.status));
+      setDemandaMultimidia(row.demanda_multimidia === true);
       setLoading(false);
     };
 
@@ -505,6 +512,7 @@ export default function EditarPauta() {
         editoria,
         deadline: deadlineFinal,
         status,
+        demanda_multimidia: demandaMultimidia,
         reporter_id: reporterId.trim(),
       });
 
@@ -532,6 +540,7 @@ export default function EditarPauta() {
       router,
       sessionCtx,
       status,
+      demandaMultimidia,
       tituloProvisorio,
     ]
   );
@@ -816,7 +825,7 @@ export default function EditarPauta() {
                     id="edit-status"
                     name="status"
                     value={status}
-                    onChange={(ev) => setStatus(ev.target.value)}
+                    onChange={(ev) => setStatus(ev.target.value as PautaStatus)}
                     disabled={!editable}
                     className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                   >
@@ -826,6 +835,22 @@ export default function EditarPauta() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div className="flex items-start gap-2 pt-0.5">
+                  <input
+                    id="edit-demanda-multimidia"
+                    type="checkbox"
+                    checked={demandaMultimidia}
+                    onChange={(ev) => setDemandaMultimidia(ev.target.checked)}
+                    disabled={!editable}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                  <label
+                    htmlFor="edit-demanda-multimidia"
+                    className={`text-sm ${editable ? "cursor-pointer text-slate-700" : "text-slate-500"}`}
+                  >
+                    Demanda Multimídia
+                  </label>
                 </div>
                 {erroForm && (
                   <p className="text-sm text-red-700" role="alert">

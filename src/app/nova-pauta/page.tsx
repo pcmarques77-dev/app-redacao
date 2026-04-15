@@ -19,6 +19,7 @@ import {
   getPautaSessionAction,
 } from "@/app/actions/pautas";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
+import type { PautaStatus } from "@/lib/pautas-shared";
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -222,7 +223,8 @@ export default function NovaPautaPage() {
   const [arquivosUrls, setArquivosUrls] = useState<string[]>([]);
   const [editoria, setEditoria] = useState("Últimas Notícias");
   const [deadline, setDeadline] = useState("");
-  const [status, setStatus] = useState("Sugerida");
+  const [demandaMultimidia, setDemandaMultimidia] = useState(false);
+  const [status, setStatus] = useState<PautaStatus>("Sugerida");
   const [salvandoPauta, setSalvandoPauta] = useState(false);
   const [erroFormPauta, setErroFormPauta] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
@@ -425,6 +427,7 @@ export default function NovaPautaPage() {
         editoria,
         deadline: deadlineFinal,
         status,
+        demanda_multimidia: demandaMultimidia,
         reporter_id: privilegedSession
           ? reporterId.trim()
           : sessionCtx!.userId,
@@ -442,6 +445,7 @@ export default function NovaPautaPage() {
     [
       arquivosUrls,
       deadline,
+      demandaMultimidia,
       editoria,
       fontes,
       privilegedSession,
@@ -692,6 +696,22 @@ export default function NovaPautaPage() {
                   )}
                 </div>
 
+                <div className="flex items-start gap-2 pt-0.5">
+                  <input
+                    id="demanda-multimidia-nova"
+                    type="checkbox"
+                    checked={demandaMultimidia}
+                    onChange={(ev) => setDemandaMultimidia(ev.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+                  />
+                  <label
+                    htmlFor="demanda-multimidia-nova"
+                    className="cursor-pointer text-sm text-slate-700"
+                  >
+                    Demanda Multimídia
+                  </label>
+                </div>
+
                 <div>
                   <label
                     htmlFor="status-pauta"
@@ -703,7 +723,7 @@ export default function NovaPautaPage() {
                     id="status-pauta"
                     name="status"
                     value={status}
-                    onChange={(ev) => setStatus(ev.target.value)}
+                    onChange={(ev) => setStatus(ev.target.value as PautaStatus)}
                     className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
                   >
                     {STATUS_OPTIONS.map(({ value, label }) => (

@@ -1,3 +1,5 @@
+import { PAUTA_STATUSES, type PautaStatus } from "@/lib/pautas-shared";
+
 export const EDITORIA_OPTIONS: string[] = [
   "Cultura e Lazer",
   "Dinheiro",
@@ -9,12 +11,5 @@ export const EDITORIA_OPTIONS: string[] = [
   "Últimas Notícias",
 ];
 
-export const STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "Sugerida", label: "Sugerida" },
-  { value: "Aprovada", label: "Aprovada" },
-  { value: "Em Apuracao", label: "Em Apuração" },
-  { value: "Redacao", label: "Redação" },
-  { value: "Revisao", label: "Revisão" },
-  { value: "Fact-Checking", label: "Fact-Checking" },
-  { value: "Finalizada", label: "Finalizada" },
-];
+export const STATUS_OPTIONS: { value: PautaStatus; label: string }[] =
+  PAUTA_STATUSES.map((value) => ({ value, label: value }));

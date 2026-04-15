@@ -2,8 +2,11 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { getAdminActor } from "@/app/actions/admin";
+import { notifyEditorsDemandaMultimidia } from "@/lib/demanda-multimidia-email";
 import {
   PAUTA_ACCESS_DENIED,
+  coercePautaStatus,
+  isPautaStatus,
   type CreatePautaInput,
   type PautaDashboardRow,
   type UpdatePautaPatch,
@@ -17,6 +20,7 @@ const UPDATE_KEYS = new Set([
   "deadline",
   "status",
   "reporter_id",
+  "demanda_multimidia",
 ]);
 
 function getServiceClient() {
@@ -92,7 +96,7 @@ export async function listPautasDashboardAction(): Promise<
     };
   }
 
-  let q = admin
+  const q = admin
     .from("pautas")
     .select(
       `
@@ -102,18 +106,27 @@ export async function listPautasDashboardAction(): Promise<
         deadline,
         status,
         reporter_id,
+        demanda_multimidia,
         reporter:usuarios!pautas_reporter_id_fkey(nome)
       `
     )
     .order("deadline", { ascending: true, nullsFirst: false });
 
-  if (!isPrivileged(actor)) {
-    q = q.eq("reporter_id", actor.userId);
-  }
-
   const { data, error } = await q;
   if (error) return { ok: false, error: error.message };
-  return { ok: true, rows: (data ?? []) as unknown as PautaDashboardRow[] };
+  const rows = ((data ?? []) as unknown as PautaDashboardRow[]).map((row) => {
+    const rawStatus =
+      typeof row.status === "string" || row.status === null
+        ? row.status
+        : null;
+    const rawDm = (row as { demanda_multimidia?: unknown }).demanda_multimidia;
+    return {
+      ...row,
+      status: coercePautaStatus(rawStatus),
+      demanda_multimidia: rawDm === true,
+    };
+  });
+  return { ok: true, rows };
 }
 
 export async function createPautaAction(
@@ -147,17 +160,40 @@ export async function createPautaAction(
       ? input.arquivos_urls
       : [];
 
+  const statusRaw = (input.status ?? "").trim() || "Sugerida";
+  if (!isPautaStatus(statusRaw)) {
+    return { ok: false, error: "Status da pauta inválido." };
+  }
+
+  const demanda_multimidia = input.demanda_multimidia === true;
+
   const { error } = await admin.from("pautas").insert({
     titulo_provisorio: titulo,
     fontes: input.fontes?.trim() ? input.fontes.trim() : null,
     arquivos_urls: arquivos,
     editoria: input.editoria?.trim() || "Últimas Notícias",
     deadline: input.deadline?.trim() ?? "",
-    status: input.status?.trim() || "Sugerida",
+    status: statusRaw,
     reporter_id,
+    demanda_multimidia,
   });
 
   if (error) return { ok: false, error: error.message };
+
+  if (demanda_multimidia) {
+    const { data: repRow } = await admin
+      .from("usuarios")
+      .select("nome")
+      .eq("id", reporter_id)
+      .maybeSingle();
+    const reporterNome = repRow?.nome?.trim() || "—";
+    await notifyEditorsDemandaMultimidia(admin, {
+      titulo: titulo,
+      reporterNome,
+      resumo: input.fontes?.trim() ? input.fontes.trim() : null,
+    });
+  }
+
   return { ok: true };
 }
 
@@ -193,10 +229,23 @@ export async function updatePautaAction(
     return { ok: false, error: PAUTA_ACCESS_DENIED };
   }
 
+  let patchToApply = patch;
+  if (patch.status !== undefined) {
+    const s = String(patch.status).trim();
+    if (!isPautaStatus(s)) {
+      return { ok: false, error: "Status da pauta inválido." };
+    }
+    patchToApply = { ...patch, status: s };
+  }
+
   const sanitized: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(patch)) {
+  for (const [k, v] of Object.entries(patchToApply)) {
     if (!UPDATE_KEYS.has(k)) continue;
     if (v === undefined) continue;
+    if (k === "demanda_multimidia") {
+      sanitized[k] = v === true;
+      continue;
+    }
     sanitized[k] = v;
   }
 
@@ -215,6 +264,31 @@ export async function updatePautaAction(
     .eq("id", pautaId);
 
   if (upErr) return { ok: false, error: upErr.message };
+
+  if (sanitized.demanda_multimidia === true) {
+    const { data: pRow } = await admin
+      .from("pautas")
+      .select(
+        "titulo_provisorio, fontes, reporter:usuarios!pautas_reporter_id_fkey(nome)"
+      )
+      .eq("id", pautaId)
+      .maybeSingle();
+
+    if (pRow) {
+      const titulo = (pRow as { titulo_provisorio?: string | null })
+        .titulo_provisorio?.trim() || "Sem título";
+      const resumo = (pRow as { fontes?: string | null }).fontes ?? null;
+      const rep = (pRow as { reporter?: { nome?: string | null } | null })
+        .reporter;
+      const reporterNome = rep?.nome?.trim() || "—";
+      await notifyEditorsDemandaMultimidia(admin, {
+        titulo,
+        reporterNome,
+        resumo,
+      });
+    }
+  }
+
   return { ok: true };
 }
 
