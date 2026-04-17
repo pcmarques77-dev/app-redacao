@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -213,10 +214,15 @@ function SortColumnHeader({
   );
 }
 
-/** Domingo (00:00 local) da semana que contém `from`. */
-function startOfWeekSunday(from: Date): Date {
+/** Índice 0 = Segunda … 6 = Domingo (rótulos com semana começando na Segunda). */
+function weekdayIndexMondayFirst(d: Date): number {
+  return (d.getDay() + 6) % 7;
+}
+
+/** Segunda-feira (00:00 local) da semana que contém `from` (semana seg–dom). */
+function startOfWeekMonday(from: Date): Date {
   const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-  d.setDate(d.getDate() - d.getDay());
+  d.setDate(d.getDate() - weekdayIndexMondayFirst(d));
   return d;
 }
 
@@ -231,6 +237,33 @@ function dateToYmd(d: Date): string {
   const m = d.getMonth() + 1;
   const day = d.getDate();
   return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Sobrevive a remontagem do painel após Server Actions / `router.refresh()`. */
+const DASHBOARD_CAL_STORAGE_KEY = "pautas-dashboard-cal-v1";
+
+type DashboardCalStored = {
+  scope: "month" | "week";
+  monthMs: number;
+  weekStartMs: number;
+  viewMode: "lista" | "calendario";
+};
+
+function parseDashboardCalStored(raw: string | null): DashboardCalStored | null {
+  if (!raw?.trim()) return null;
+  try {
+    const p = JSON.parse(raw) as Partial<DashboardCalStored>;
+    if (p.scope !== "month" && p.scope !== "week") return null;
+    if (typeof p.monthMs !== "number" || typeof p.weekStartMs !== "number") {
+      return null;
+    }
+    if (p.viewMode !== "lista" && p.viewMode !== "calendario") return null;
+    if (Number.isNaN(new Date(p.monthMs).getTime())) return null;
+    if (Number.isNaN(new Date(p.weekStartMs).getTime())) return null;
+    return p as DashboardCalStored;
+  } catch {
+    return null;
+  }
 }
 
 function formatWeekRangeTitle(weekStart: Date): string {
@@ -305,9 +338,9 @@ function PautasCalendar({
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
   const first = new Date(year, month, 1);
-  const startPad = first.getDay();
+  const startPad = weekdayIndexMondayFirst(first);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const weekLabels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  const weekLabels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
   const cells: { day: number | null; key: string | null }[] = [];
   for (let i = 0; i < startPad; i++) {
@@ -378,42 +411,165 @@ function PautasCalendar({
     setDropHighlightKey(null);
   }, []);
 
-  const renderFeriadoNoDia = (dayKey: string) => {
-    const rows = escalas.filter((e) => {
-      if (!isFeriadoTipo(e.tipo)) return false;
+  type CalendarioDiaItem =
+    | { tipo: "feriado"; escala: EscalaRow }
+    | { tipo: "plantao"; escala: EscalaRow }
+    | { tipo: "pauta"; pauta: PautaRow }
+    | { tipo: "ferias"; escala: EscalaRow };
+
+  const CAL_EVENT_ORDER: Record<CalendarioDiaItem["tipo"], number> = {
+    feriado: 1,
+    plantao: 2,
+    pauta: 3,
+    ferias: 4,
+  };
+
+  const getCalendarioDiaItens = (dayKey: string): CalendarioDiaItem[] => {
+    const items: CalendarioDiaItem[] = [];
+
+    for (const e of escalas) {
+      if (!isFeriadoTipo(e.tipo)) continue;
       const ini = e.data_inicio?.trim() ?? "";
       const fim = e.data_fim?.trim() || ini;
-      return dayYmdInFeriasRange(dayKey, ini, fim);
-    });
-    if (rows.length === 0) return null;
+      if (dayYmdInFeriasRange(dayKey, ini, fim)) {
+        items.push({ tipo: "feriado", escala: e });
+      }
+    }
+
+    for (const e of escalas) {
+      if (isPlantaoTipo(e.tipo) && e.data_inicio?.trim() === dayKey) {
+        items.push({ tipo: "plantao", escala: e });
+      }
+    }
+
+    for (const p of pautasPorDia.get(dayKey) ?? []) {
+      items.push({ tipo: "pauta", pauta: p });
+    }
+
+    for (const e of escalas) {
+      if (
+        isFeriasTipo(e.tipo) &&
+        dayYmdInFeriasRange(dayKey, e.data_inicio, e.data_fim)
+      ) {
+        items.push({ tipo: "ferias", escala: e });
+      }
+    }
+
+    return items.sort(
+      (a, b) => CAL_EVENT_ORDER[a.tipo] - CAL_EVENT_ORDER[b.tipo]
+    );
+  };
+
+  const renderCalendarioDiaCards = (dayKey: string) => {
+    const itens = getCalendarioDiaItens(dayKey);
+    if (itens.length === 0) return null;
     return (
       <div className="mt-1 space-y-1">
-        {rows.map((e) => {
-          const ini = e.data_inicio?.trim() ?? "";
-          const fim = e.data_fim?.trim() || ini;
-          const nomeFeriado = e.coordenador?.trim() || "Feriado";
-          const periodoLabel =
-            ini === fim
-              ? formatDeadlinePtBR(ini)
-              : `${formatDeadlinePtBR(ini)} – ${formatDeadlinePtBR(fim)}`;
+        {itens.map((item) => {
+          const key =
+            item.tipo === "pauta"
+              ? `pauta-${item.pauta.id}`
+              : `${item.tipo}-${item.escala.id}`;
+
+          if (item.tipo === "feriado") {
+            const e = item.escala;
+            const ini = e.data_inicio?.trim() ?? "";
+            const fim = e.data_fim?.trim() || ini;
+            const nomeFeriado = e.coordenador?.trim() || "Feriado";
+            const periodoLabel =
+              ini === fim
+                ? formatDeadlinePtBR(ini)
+                : `${formatDeadlinePtBR(ini)} – ${formatDeadlinePtBR(fim)}`;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onEscalaCardClick?.(e, dayKey);
+                }}
+                className="block w-full cursor-pointer rounded border border-violet-400/70 bg-violet-100 px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-violet-950 shadow-sm transition hover:ring-2 hover:ring-violet-400/50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-violet-500"
+              >
+                <span className="line-clamp-2 font-semibold">
+                  👑 {nomeFeriado}: {escalaUsuarioNome(e)}
+                </span>
+                {periodoLabel && (
+                  <span className="mt-0.5 block truncate text-[9px] font-normal tabular-nums opacity-85">
+                    {periodoLabel}
+                  </span>
+                )}
+              </button>
+            );
+          }
+
+          if (item.tipo === "plantao") {
+            const e = item.escala;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onEscalaCardClick?.(e, dayKey);
+                }}
+                className="block w-full cursor-pointer rounded border border-slate-700/35 bg-slate-800 px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-amber-50 shadow-sm transition hover:ring-2 hover:ring-amber-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-amber-400"
+              >
+                <span className="line-clamp-2 font-semibold">
+                  Plantão: {escalaUsuarioNome(e)}
+                </span>
+                {e.horario?.trim() && (
+                  <span className="mt-0.5 block truncate text-[9px] font-normal tabular-nums opacity-85">
+                    {e.horario.trim()}
+                  </span>
+                )}
+              </button>
+            );
+          }
+
+          if (item.tipo === "ferias") {
+            const e = item.escala;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onEscalaCardClick?.(e, dayKey);
+                }}
+                className="block w-full cursor-pointer rounded border border-dashed border-emerald-600/45 bg-emerald-50/95 px-1.5 py-0.5 text-left text-[10px] leading-snug text-emerald-900 transition hover:bg-emerald-100/95 focus-visible:outline focus-visible:ring-2 focus-visible:ring-emerald-500"
+              >
+                ✈️ Férias: {escalaUsuarioNome(e)}
+              </button>
+            );
+          }
+
+          const p = item.pauta;
+          const canDrag = canManageDeadlineForPauta?.(p) ?? false;
           return (
             <button
-              key={`escala-feriado-${e.id}`}
+              key={key}
               type="button"
-              onClick={(ev) => {
-                ev.stopPropagation();
-                onEscalaCardClick?.(e, dayKey);
+              data-pauta-calendario-chip
+              data-pauta-id={p.id}
+              draggable={canDrag}
+              onDragStart={canDrag ? handleDragStartCard : undefined}
+              onDragEnd={canDrag ? handleDragEndCard : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onPautaChipClick?.(p);
               }}
-              className="block w-full cursor-pointer rounded border border-violet-400/70 bg-violet-100 px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-violet-950 shadow-sm transition hover:ring-2 hover:ring-violet-400/50 focus-visible:outline focus-visible:ring-2 focus-visible:ring-violet-500"
+              className={`${statusCalendarChipClass(p.status)} w-full text-left ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
             >
-              <span className="line-clamp-2 font-semibold">
-                👑 {nomeFeriado}: {escalaUsuarioNome(e)}
+              <span className="line-clamp-2">
+                {p.titulo_provisorio?.trim() || "Sem título"}
               </span>
-              {periodoLabel && (
-                <span className="mt-0.5 block truncate text-[9px] font-normal tabular-nums opacity-85">
-                  {periodoLabel}
-                </span>
-              )}
+              <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
+                {p.editoria?.trim() || "—"}
+              </span>
+              <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
+                {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
+              </span>
             </button>
           );
         })}
@@ -421,98 +577,9 @@ function PautasCalendar({
     );
   };
 
-  const renderPlantoesNoDia = (dayKey: string) => {
-    const plantoes = escalas.filter(
-      (e) => isPlantaoTipo(e.tipo) && e.data_inicio?.trim() === dayKey
-    );
-    if (plantoes.length === 0) return null;
-    return (
-      <div className="mt-1 space-y-1">
-        {plantoes.map((e) => (
-          <button
-            key={`escala-plantao-${e.id}`}
-            type="button"
-            onClick={(ev) => {
-              ev.stopPropagation();
-              onEscalaCardClick?.(e, dayKey);
-            }}
-            className="block w-full cursor-pointer rounded border border-slate-700/35 bg-slate-800 px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-amber-50 shadow-sm transition hover:ring-2 hover:ring-amber-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-amber-400"
-          >
-            <span className="line-clamp-2 font-semibold">
-              Plantão: {escalaUsuarioNome(e)}
-            </span>
-            {e.horario?.trim() && (
-              <span className="mt-0.5 block truncate text-[9px] font-normal tabular-nums opacity-85">
-                {e.horario.trim()}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-    );
-  };
-
-  const renderFeriasNoDia = (dayKey: string) => {
-    const feriasNoDia = escalas.filter(
-      (e) =>
-        isFeriasTipo(e.tipo) &&
-        dayYmdInFeriasRange(dayKey, e.data_inicio, e.data_fim)
-    );
-    if (feriasNoDia.length === 0) return null;
-    return (
-      <div className="mt-1 space-y-1">
-        {feriasNoDia.map((e) => (
-          <button
-            key={`escala-ferias-${e.id}`}
-            type="button"
-            onClick={(ev) => {
-              ev.stopPropagation();
-              onEscalaCardClick?.(e, dayKey);
-            }}
-            className="block w-full cursor-pointer rounded border border-dashed border-emerald-600/45 bg-emerald-50/95 px-1.5 py-0.5 text-left text-[10px] leading-snug text-emerald-900 transition hover:bg-emerald-100/95 focus-visible:outline focus-visible:ring-2 focus-visible:ring-emerald-500"
-          >
-            ✈️ Férias: {escalaUsuarioNome(e)}
-          </button>
-        ))}
-      </div>
-    );
-  };
-
-  const renderPautaList = (dayKey: string, listClassName: string) => (
-    <ul className={listClassName}>
-      {(pautasPorDia.get(dayKey) ?? []).map((p) => {
-        const canDrag = canManageDeadlineForPauta?.(p) ?? false;
-        return (
-        <li key={p.id}>
-          <button
-            type="button"
-            data-pauta-calendario-chip
-            data-pauta-id={p.id}
-            draggable={canDrag}
-            onDragStart={canDrag ? handleDragStartCard : undefined}
-            onDragEnd={canDrag ? handleDragEndCard : undefined}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onPautaChipClick?.(p);
-            }}
-            className={`${statusCalendarChipClass(p.status)} w-full text-left ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
-          >
-            <span className="line-clamp-2">
-              {p.titulo_provisorio?.trim() || "Sem título"}
-            </span>
-            <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
-              {p.editoria?.trim() || "—"}
-            </span>
-            <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
-              {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
-            </span>
-          </button>
-        </li>
-        );
-      })}
-    </ul>
-  );
+  /** @deprecated Use `renderCalendarioDiaCards`; kept for HMR/bundler caches that still reference the old name. */
+  const renderPautaList = (dayKey: string, _listClassName?: string) =>
+    renderCalendarioDiaCards(dayKey);
 
   const dayCellHandlers = (dayKey: string | null) => {
     if (!dayKey) {
@@ -570,13 +637,13 @@ function PautasCalendar({
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-px bg-slate-200">
+          <div className="grid grid-cols-7 items-stretch gap-px bg-slate-200">
             {cells.map((cell, idx) => {
               const dayKey = cell.key;
               return (
                 <div
                   key={idx}
-                  className={`min-h-[7.5rem] p-1 transition-colors sm:min-h-[8.5rem] sm:p-1.5 ${
+                  className={`h-auto min-h-[150px] p-1 transition-colors sm:min-h-[160px] sm:p-1.5 ${
                     cell.day === null
                       ? "bg-slate-50/80"
                       : dropHighlightKey === dayKey
@@ -590,13 +657,7 @@ function PautasCalendar({
                       <div className="mb-1 text-right text-xs font-semibold tabular-nums text-slate-500">
                         {cell.day}
                       </div>
-                      {renderPautaList(
-                        dayKey,
-                        "max-h-[5.5rem] space-y-1 overflow-y-auto sm:max-h-[6.5rem]"
-                      )}
-                      {renderFeriadoNoDia(dayKey)}
-                      {renderPlantoesNoDia(dayKey)}
-                      {renderFeriasNoDia(dayKey)}
+                      {renderCalendarioDiaCards(dayKey)}
                     </>
                   )}
                 </div>
@@ -616,7 +677,7 @@ function PautasCalendar({
                   className="bg-slate-100 px-1 py-2 text-center text-slate-600"
                 >
                   <div className="text-xs font-semibold uppercase tracking-wide">
-                    {weekLabels[d.getDay()]}
+                    {weekLabels[weekdayIndexMondayFirst(d)]}
                   </div>
                   <div className="mt-0.5 text-[11px] font-medium capitalize tabular-nums text-slate-700 sm:text-xs">
                     {d.toLocaleDateString("pt-BR", {
@@ -628,26 +689,20 @@ function PautasCalendar({
               );
             })}
           </div>
-          <div className="grid grid-cols-7 gap-px bg-slate-200">
+          <div className="grid grid-cols-7 items-stretch gap-px bg-slate-200">
             {Array.from({ length: 7 }, (_, i) => {
               const dayKey = dateToYmd(addDaysLocal(weekStart, i));
               return (
                 <div
                   key={dayKey}
-                  className={`min-h-[10rem] p-1.5 transition-colors sm:min-h-[12rem] sm:p-2 ${
+                  className={`h-auto min-h-[150px] p-1.5 transition-colors sm:min-h-[12rem] sm:p-2 ${
                     dropHighlightKey === dayKey
                       ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400/70"
                       : "bg-white"
                   }${onDayClick ? " cursor-pointer" : ""}`}
                   {...dayCellHandlers(dayKey)}
                 >
-                  {renderPautaList(
-                    dayKey,
-                    "max-h-[min(24rem,calc(100vh-18rem))] space-y-1 overflow-y-auto sm:max-h-[min(28rem,calc(100vh-16rem))]"
-                  )}
-                  {renderFeriadoNoDia(dayKey)}
-                  {renderPlantoesNoDia(dayKey)}
-                  {renderFeriasNoDia(dayKey)}
+                  {renderCalendarioDiaCards(dayKey)}
                 </div>
               );
             })}
@@ -751,18 +806,49 @@ export function PautasDashboard() {
   });
   const [calendarScope, setCalendarScope] = useState<"month" | "week">("month");
   const [calendarWeekStart, setCalendarWeekStart] = useState(() =>
-    startOfWeekSunday(new Date())
+    startOfWeekMonday(new Date())
   );
+
+  const skipFirstCalPersistRef = useRef(true);
+
+  useLayoutEffect(() => {
+    const p = parseDashboardCalStored(
+      sessionStorage.getItem(DASHBOARD_CAL_STORAGE_KEY)
+    );
+    if (!p) return;
+    setCalendarScope(p.scope);
+    setCalendarMonth(new Date(p.monthMs));
+    setCalendarWeekStart(new Date(p.weekStartMs));
+    setViewMode(p.viewMode);
+  }, []);
+
+  useEffect(() => {
+    if (skipFirstCalPersistRef.current) {
+      skipFirstCalPersistRef.current = false;
+      return;
+    }
+    try {
+      const payload: DashboardCalStored = {
+        scope: calendarScope,
+        monthMs: calendarMonth.getTime(),
+        weekStartMs: calendarWeekStart.getTime(),
+        viewMode,
+      };
+      sessionStorage.setItem(DASHBOARD_CAL_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      /* ignore */
+    }
+  }, [calendarScope, calendarMonth, calendarWeekStart, viewMode]);
 
   const handleCalendarScopeChange = useCallback((s: "month" | "week") => {
     setCalendarScope(s);
     if (s === "week") {
-      setCalendarWeekStart(startOfWeekSunday(new Date()));
+      setCalendarWeekStart(startOfWeekMonday(new Date()));
     } else {
-      const d = new Date();
-      setCalendarMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+      const ref = calendarWeekStart;
+      setCalendarMonth(new Date(ref.getFullYear(), ref.getMonth(), 1));
     }
-  }, []);
+  }, [calendarWeekStart]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [modalTitulo, setModalTitulo] = useState("");
@@ -918,18 +1004,18 @@ export function PautasDashboard() {
     [sortColumn]
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const fetchDashboardData = useCallback(async (): Promise<
+    | { ok: true; pautas: PautaRow[]; escalas: EscalaRow[] }
+    | { ok: false; error: string }
+  > => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!url?.trim() || !key?.trim()) {
-      setError(
-        "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no arquivo .env.local."
-      );
-      setPautas([]);
-      setLoading(false);
-      return;
+      return {
+        ok: false,
+        error:
+          "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no arquivo .env.local.",
+      };
     }
     const supabase = createBrowserClient();
     const [pautaResult, eRes] = await Promise.all([
@@ -952,19 +1038,49 @@ export function PautasDashboard() {
     ]);
 
     if (!pautaResult.ok) {
-      setError(pautaResult.error || "Não foi possível carregar as pautas.");
+      return {
+        ok: false,
+        error: pautaResult.error || "Não foi possível carregar as pautas.",
+      };
+    }
+    const escalas: EscalaRow[] = eRes.error
+      ? []
+      : ((eRes.data ?? []) as unknown as EscalaRow[]);
+    return {
+      ok: true,
+      pautas: pautaResult.rows as PautaRow[],
+      escalas,
+    };
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const res = await fetchDashboardData();
+    if (!res.ok) {
+      setError(res.error);
       setPautas([]);
       setEscalas([]);
     } else {
-      setPautas(pautaResult.rows as PautaRow[]);
-      if (eRes.error) {
-        setEscalas([]);
-      } else {
-        setEscalas((eRes.data ?? []) as unknown as EscalaRow[]);
-      }
+      setPautas(res.pautas);
+      setEscalas(res.escalas);
     }
     setLoading(false);
-  }, []);
+  }, [fetchDashboardData]);
+
+  /** Atualiza pautas/escalas sem `loading` global — preserva Mês/Semana e demais estado de UI. */
+  const refreshDashboardData = useCallback(async () => {
+    const res = await fetchDashboardData();
+    if (!res.ok) {
+      setFeedbackErro(
+        res.error ||
+          "Não foi possível atualizar os dados. Tente recarregar a página."
+      );
+      return;
+    }
+    setPautas(res.pautas);
+    setEscalas(res.escalas);
+  }, [fetchDashboardData]);
 
   useEffect(() => {
     void load();
@@ -994,6 +1110,11 @@ export function PautasDashboard() {
     if (!isModalOpen || !sessionCtx || privilegedSession) return;
     setModalReporterId(sessionCtx.userId);
   }, [isModalOpen, sessionCtx, privilegedSession]);
+
+  useEffect(() => {
+    if (privilegedSession || !isModalOpen) return;
+    if (modalTab === "escala") setModalTab("pauta");
+  }, [privilegedSession, isModalOpen, modalTab]);
 
   useEffect(() => {
     if (!isModalOpen) return;
@@ -1068,8 +1189,8 @@ export function PautasDashboard() {
       return;
     }
     setSelecionadas([]);
-    void load();
-  }, [load, selecionadas]);
+    void refreshDashboardData();
+  }, [refreshDashboardData, selecionadas]);
 
   const handleStatusChange = useCallback(
     async (id: string, newStatus: PautaStatus) => {
@@ -1251,6 +1372,12 @@ export function PautasDashboard() {
 
   const handleEscalaCardClick = useCallback(
     (row: EscalaRow, dayYmd: string) => {
+      if (!privilegedSession) {
+        setFeedbackErro(
+          "Acesso negado. Apenas editores podem gerenciar a escala."
+        );
+        return;
+      }
       setSelectedDate(dayYmd);
       setEditingEscala(row);
       setModalTitulo("");
@@ -1265,7 +1392,7 @@ export function PautasDashboard() {
       setEscalaSaving(false);
       setIsModalOpen(true);
     },
-    []
+    [privilegedSession]
   );
 
   const handleSubmitNovaPautaModal = useCallback(
@@ -1305,11 +1432,11 @@ export function PautasDashboard() {
         return;
       }
       closeNovaPautaModal();
-      void load();
+      void refreshDashboardData();
     },
     [
       closeNovaPautaModal,
-      load,
+      refreshDashboardData,
       modalEditoria,
       modalDemandaMultimidia,
       modalReporterId,
@@ -1486,12 +1613,14 @@ export function PautasDashboard() {
           >
             Radar de Pautas
           </Link>
-          <Link
-            href="/escala"
-            className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-          >
-            Escala
-          </Link>
+          {privilegedSession ? (
+            <Link
+              href="/escala"
+              className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+            >
+              Escala
+            </Link>
+          ) : null}
           <Link
             href="/nova-pauta"
             className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
@@ -1890,20 +2019,22 @@ export function PautasDashboard() {
               >
                 Nova Pauta
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={modalTab === "escala"}
-                onClick={() => setModalTab("escala")}
-                disabled={modalSaving || escalaSaving}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                  modalTab === "escala"
-                    ? "border-blue-600 font-semibold text-slate-900"
-                    : "border-transparent font-medium text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Escala
-              </button>
+              {privilegedSession ? (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={modalTab === "escala"}
+                  onClick={() => setModalTab("escala")}
+                  disabled={modalSaving || escalaSaving}
+                  className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                    modalTab === "escala"
+                      ? "border-blue-600 font-semibold text-slate-900"
+                      : "border-transparent font-medium text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  Escala
+                </button>
+              ) : null}
             </div>
 
             {modalTab === "pauta" && (
@@ -2082,7 +2213,7 @@ export function PautasDashboard() {
               </>
             )}
 
-            {modalTab === "escala" && (
+            {privilegedSession && modalTab === "escala" && (
               <div className="mt-4" role="tabpanel">
                 <p className="mb-3 text-sm text-slate-600">
                   {editingEscala ? (
@@ -2119,7 +2250,7 @@ export function PautasDashboard() {
                   idPrefix="modal-escala"
                   onSuccess={() => {
                     closeNovaPautaModal();
-                    void load();
+                    void refreshDashboardData();
                   }}
                   onDirtyChange={setEscalaFormDirty}
                   onSavingChange={setEscalaSaving}

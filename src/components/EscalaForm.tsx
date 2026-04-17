@@ -9,7 +9,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { deleteEscala } from "@/app/actions/escalas";
+import { deleteEscala, saveEscalaAction } from "@/app/actions/escalas";
 import { createBrowserClient } from "@/lib/supabase/client";
 
 export const ESCALA_TIPO_FERIADO = "Feriado";
@@ -378,7 +378,6 @@ export function EscalaForm({
       }
 
       setSaving(true);
-      const supabase = createBrowserClient();
 
       let row: Record<string, unknown>;
       if (tipo === ESCALA_TIPO_FERIADO) {
@@ -410,16 +409,12 @@ export function EscalaForm({
         };
       }
 
-      const writeErr = editingId
-        ? (
-            await supabase.from("escalas").update(row).eq("id", editingId)
-          ).error
-        : (await supabase.from("escalas").insert(row)).error;
+      const saveRes = await saveEscalaAction(editingId, row);
       setSaving(false);
 
-      if (writeErr) {
+      if (!saveRes.ok) {
         setFormError(
-          writeErr.message ||
+          saveRes.error ||
             "Não foi possível salvar. Verifique se a tabela escalas existe e as políticas RLS."
         );
         return;

@@ -2,10 +2,63 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { EscalaForm } from "@/components/EscalaForm";
+import { canManageEscala } from "@/lib/admin-acl";
+import { createBrowserClient } from "@/lib/supabase/client";
 
 export default function EscalaPage() {
   const router = useRouter();
+  const [allowed, setAllowed] = useState(false);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    const supabase = createBrowserClient();
+    void (async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user?.id) {
+          router.replace("/");
+          return;
+        }
+        const { data: row } = await supabase
+          .from("usuarios")
+          .select("funcao")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (
+          !canManageEscala({
+            email: user.email,
+            funcao: row?.funcao ?? null,
+          })
+        ) {
+          router.replace("/");
+          return;
+        }
+        setAllowed(true);
+      } catch {
+        router.replace("/");
+      } finally {
+        setChecking(false);
+      }
+    })();
+  }, [router]);
+
+  if (checking) {
+    return (
+      <div className="mx-auto max-w-lg px-4 py-10 sm:px-6 lg:px-8">
+        <p className="text-sm text-slate-600" role="status">
+          Verificando permissão…
+        </p>
+      </div>
+    );
+  }
+
+  if (!allowed) {
+    return null;
+  }
 
   return (
     <div className="mx-auto max-w-lg px-4 py-10 sm:px-6 lg:px-8">

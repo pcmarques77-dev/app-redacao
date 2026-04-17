@@ -1,6 +1,6 @@
 import { PAUTA_STATUSES, type PautaStatus } from "@/lib/pautas-shared";
 
-export const EDITORIA_OPTIONS: string[] = [
+const EDITORIAS: readonly string[] = [
   "Cultura e Lazer",
   "Dinheiro",
   "Estilo de Vida",
@@ -10,6 +10,10 @@ export const EDITORIA_OPTIONS: string[] = [
   "Carreira e Educação",
   "Últimas Notícias",
 ];
+
+export const EDITORIA_OPTIONS: string[] = [...EDITORIAS].sort((a, b) =>
+  a.localeCompare(b, "pt-BR")
+);
 
 export const STATUS_OPTIONS: { value: PautaStatus; label: string }[] =
   PAUTA_STATUSES.map((value) => ({ value, label: value }));

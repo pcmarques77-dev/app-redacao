@@ -14,6 +14,14 @@ export function isEditorRole(funcao: string | null | undefined): boolean {
   return (funcao ?? "").trim() === "Editor";
 }
 
+/** Super admin ou Editor: gerenciar cadastro de escala (plantão, férias, feriado). */
+export function canManageEscala(args: {
+  email: string | null | undefined;
+  funcao: string | null | undefined;
+}): boolean {
+  return isSuperAdminEmail(args.email) || isEditorRole(args.funcao);
+}
+
 /** Quem pode editar ou excluir uma pauta no painel (super admin, Editor ou autor). */
 export function canUserEditOrDeletePauta(args: {
   currentUserId: string;

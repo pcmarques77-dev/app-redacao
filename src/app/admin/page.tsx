@@ -16,7 +16,11 @@ import {
   updateUsuariosRowAction,
   type UsuarioTableRow,
 } from "@/app/actions/admin";
-import { isEditorRole, isSuperAdminEmail } from "@/lib/admin-acl";
+import {
+  canManageEscala,
+  isEditorRole,
+  isSuperAdminEmail,
+} from "@/lib/admin-acl";
 import { createBrowserClient } from "@/lib/supabase/client";
 
 function isoToDatetimeLocalValue(iso: string | null): string {
@@ -315,12 +319,18 @@ function AdminUsuariosPageContent() {
             >
               Radar de Pautas
             </Link>
-            <Link
-              href="/escala"
-              className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-            >
-              Escala
-            </Link>
+            {authHydrated &&
+              canManageEscala({
+                email: currentUserEmail,
+                funcao: currentUserRole,
+              }) && (
+                <Link
+                  href="/escala"
+                  className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                >
+                  Escala
+                </Link>
+              )}
             <Link
               href="/nova-pauta"
               className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"

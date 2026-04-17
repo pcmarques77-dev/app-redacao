@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { canManageEscala } from "@/lib/admin-acl";
+import { createBrowserClient } from "@/lib/supabase/client";
 import { FonteLogo } from "./FonteLogo";
 
 type NoticiaRonda = {
@@ -72,6 +74,7 @@ export function RondaClient({
   const [carregandoLista, setCarregandoLista] = useState(autoLoadOnMount);
   const [erro, setErro] = useState<string | null>(null);
   const autoLoadFeito = useRef(false);
+  const [showEscalaNavLink, setShowEscalaNavLink] = useState(false);
 
   const atualizarRonda = useCallback(async (forceRefresh?: boolean) => {
     setErro(null);
@@ -114,6 +117,34 @@ export function RondaClient({
     void atualizarRonda();
   }, [autoLoadOnMount, atualizarRonda]);
 
+  useEffect(() => {
+    if (!showMainNavRow) {
+      setShowEscalaNavLink(false);
+      return;
+    }
+    const supabase = createBrowserClient();
+    void (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user?.id) {
+        setShowEscalaNavLink(false);
+        return;
+      }
+      const { data: row } = await supabase
+        .from("usuarios")
+        .select("funcao")
+        .eq("id", user.id)
+        .maybeSingle();
+      setShowEscalaNavLink(
+        canManageEscala({
+          email: user.email,
+          funcao: row?.funcao ?? null,
+        })
+      );
+    })();
+  }, [showMainNavRow]);
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/90">
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
@@ -146,12 +177,14 @@ export function RondaClient({
               >
                 {mainNavSecondIsAdmin ? "Admin" : "Radar de Pautas"}
               </Link>
-              <Link
-                href="/escala"
-                className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-              >
-                Escala
-              </Link>
+              {showEscalaNavLink ? (
+                <Link
+                  href="/escala"
+                  className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                >
+                  Escala
+                </Link>
+              ) : null}
               <Link
                 href="/nova-pauta"
                 className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
