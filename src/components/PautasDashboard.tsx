@@ -33,6 +33,7 @@ import {
   type PautaStatus,
 } from "@/lib/pautas-shared";
 import {
+  deadlineTimeOfDayMinutes,
   deadlineYmdSortKey,
   formatDeadlinePtBR,
   parseDeadlineToYmd,
@@ -42,6 +43,7 @@ import {
   EscalaForm,
   type EscalaInitialValues,
 } from "@/components/EscalaForm";
+import logoVivaTaglineAzul from "@/assets/logo-viva-tagline-azul.svg";
 
 type ModalReporterOption = {
   id: string;
@@ -112,6 +114,30 @@ function dayYmdInFeriasRange(
   const b = end?.trim() ?? "";
   if (!a || !b) return false;
   return dayYmd >= a && dayYmd <= b;
+}
+
+/** Início do plantão em minutos (0–1439), alinhado ao formato salvo em `escalas.horario`. */
+function plantaoHorarioStartMinutes(
+  horario: string | null | undefined
+): number | null {
+  const raw = horario?.trim();
+  if (!raw) return null;
+  const firstPart = raw.split(/\s*[–—-]\s*/)[0]?.trim() ?? raw;
+  const br = firstPart.match(/^(\d{1,2})h(?:(\d{2}))?$/i);
+  if (br) {
+    const h = parseInt(br[1] ?? "0", 10);
+    const m = br[2] ? parseInt(br[2], 10) : 0;
+    if (h > 23 || m > 59) return null;
+    return h * 60 + m;
+  }
+  const iso = firstPart.match(/^(\d{1,2}):(\d{2})$/);
+  if (iso) {
+    const h = parseInt(iso[1] ?? "0", 10);
+    const m = parseInt(iso[2] ?? "0", 10);
+    if (h > 23 || m > 59) return null;
+    return h * 60 + m;
+  }
+  return null;
 }
 
 function reporterNome(p: PautaRow): string {
@@ -297,8 +323,8 @@ function statusCalendarChipClass(status: PautaStatus | null): string {
     "block w-full rounded border px-1.5 py-1 text-left text-[11px] font-medium leading-snug transition hover:ring-2 hover:ring-blue-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-blue-500";
   if (n === "sugerida") return `${base} border-slate-200 bg-slate-100 text-slate-700`;
   if (n === "em producao") return `${base} border-amber-200 bg-amber-100 text-amber-800`;
-  if (n === "pronto") return `${base} border-emerald-200 bg-emerald-100 text-emerald-800`;
-  if (n === "publicada") return `${base} border-blue-200 bg-blue-100 text-blue-800`;
+  if (n === "pronto") return `${base} border-blue-200 bg-blue-100 text-blue-800`;
+  if (n === "publicada") return `${base} border-emerald-200 bg-emerald-100 text-emerald-800`;
   return `${base} border-slate-200 bg-slate-100 text-slate-700`;
 }
 
@@ -424,6 +450,19 @@ function PautasCalendar({
     ferias: 4,
   };
 
+  const calendarioDiaItemMinutes = (item: CalendarioDiaItem): number | null => {
+    if (item.tipo === "plantao") {
+      return plantaoHorarioStartMinutes(item.escala.horario);
+    }
+    if (item.tipo === "pauta") {
+      return deadlineTimeOfDayMinutes(item.pauta.deadline);
+    }
+    return null;
+  };
+
+  const calendarioDiaItemTieBreakId = (item: CalendarioDiaItem): string =>
+    item.tipo === "pauta" ? item.pauta.id : item.escala.id;
+
   const getCalendarioDiaItens = (dayKey: string): CalendarioDiaItem[] => {
     const items: CalendarioDiaItem[] = [];
 
@@ -455,9 +494,23 @@ function PautasCalendar({
       }
     }
 
-    return items.sort(
-      (a, b) => CAL_EVENT_ORDER[a.tipo] - CAL_EVENT_ORDER[b.tipo]
-    );
+    // Ordem fixa: Feriado → Plantão → Pautas → Férias; dentro do mesmo tipo, por horário (se houver).
+    return items.sort((a, b) => {
+      const tipoDiff =
+        CAL_EVENT_ORDER[a.tipo] - CAL_EVENT_ORDER[b.tipo];
+      if (tipoDiff !== 0) return tipoDiff;
+      const ma = calendarioDiaItemMinutes(a);
+      const mb = calendarioDiaItemMinutes(b);
+      const aHas = ma != null;
+      const bHas = mb != null;
+      if (aHas && bHas && ma !== mb) return ma - mb;
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+      return calendarioDiaItemTieBreakId(a).localeCompare(
+        calendarioDiaItemTieBreakId(b),
+        "pt-BR"
+      );
+    });
   };
 
   const renderCalendarioDiaCards = (dayKey: string) => {
@@ -719,8 +772,8 @@ function statusSelectClassName(status: PautaStatus | null): string {
     "w-full min-w-[9.5rem] max-w-full rounded-md border px-2 py-1.5 text-xs font-medium shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-[12rem]";
   if (n === "sugerida") return `${base} border-slate-200 bg-slate-100 text-slate-700`;
   if (n === "em producao") return `${base} border-amber-200 bg-amber-100 text-amber-800`;
-  if (n === "pronto") return `${base} border-emerald-200 bg-emerald-100 text-emerald-800`;
-  if (n === "publicada") return `${base} border-blue-200 bg-blue-100 text-blue-800`;
+  if (n === "pronto") return `${base} border-blue-200 bg-blue-100 text-blue-800`;
+  if (n === "publicada") return `${base} border-emerald-200 bg-emerald-100 text-emerald-800`;
   return `${base} border-slate-200 bg-slate-100 text-slate-700`;
 }
 
@@ -1575,18 +1628,33 @@ export function PautasDashboard() {
     </div>
   );
 
+  const dashboardHeadline =
+    process.env.NEXT_PUBLIC_TITULO_DASHBOARD || "Painel de Pautas";
+  const logoVivaTaglineSrc =
+    typeof logoVivaTaglineAzul === "string"
+      ? logoVivaTaglineAzul
+      : logoVivaTaglineAzul.src;
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
       <header className="mb-0 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <Link
-            href="/"
-            className="inline-block cursor-pointer rounded-sm text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-          >
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 transition-colors hover:text-slate-700 sm:text-3xl">
-            {process.env.NEXT_PUBLIC_TITULO_DASHBOARD || "Painel de Pautas"}
-            </h1>
-          </Link>
+          <h1 className="m-0">
+            <Link
+              href="/"
+              aria-label={dashboardHeadline}
+              className="inline-block max-w-full cursor-pointer rounded-sm text-left transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element -- SVG vetorial importado de assets */}
+              <img
+                src={logoVivaTaglineSrc}
+                alt=""
+                width={7418}
+                height={1175}
+                className="h-8 w-auto max-h-9 max-w-[min(100%,18rem)] object-contain object-left sm:h-10 sm:max-h-11 sm:max-w-[min(100%,22rem)] lg:max-w-[26rem]"
+              />
+            </Link>
+          </h1>
           {sessionCtx ? (
             <p className="mt-2 text-sm">
               <Link

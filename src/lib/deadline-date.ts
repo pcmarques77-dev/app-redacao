@@ -33,3 +33,20 @@ export function deadlineYmdSortKey(value: string | null | undefined): number | n
   if (!ymd) return null;
   return parseInt(ymd.replace(/-/g, ""), 10);
 }
+
+/**
+ * Minutos desde meia-noite (0–1439) quando o prazo inclui horário (ex.: ISO com `T`);
+ * `null` para data pura `YYYY-MM-DD` ou valor inválido.
+ */
+export function deadlineTimeOfDayMinutes(
+  value: string | null | undefined
+): number | null {
+  if (value == null) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const t = Date.parse(s);
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  return d.getHours() * 60 + d.getMinutes();
+}

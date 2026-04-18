@@ -54,6 +54,61 @@ export type EscalaFormProps = {
   idPrefix?: string;
 };
 
+function normalizeTipoKey(t: string | null): string {
+  return (t ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+}
+
+/** Normaliza um trecho de horário (ex.: `8h`, `08:30`) para `HH:MM` usado em `<input type="time">`. */
+function parseSingleTimeToken(raw: string): string {
+  const t = raw.trim().toLowerCase();
+  if (!t) return "";
+  const br = t.match(/^(\d{1,2})h(?:(\d{2}))?$/);
+  if (br) {
+    const h = parseInt(br[1] ?? "0", 10);
+    const min = br[2] ? parseInt(br[2], 10) : 0;
+    if (h > 23 || min > 59) return "";
+    return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+  }
+  const iso = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (iso) {
+    const h = parseInt(iso[1] ?? "0", 10);
+    const min = parseInt(iso[2] ?? "0", 10);
+    if (h > 23 || min > 59) return "";
+    return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
+  }
+  return "";
+}
+
+/** Lê `horario` já salvo (texto livre antigo ou `HH:MM–HH:MM`) para os dois campos de relógio. */
+function parseStoredHorario(stored: string): { inicio: string; fim: string } {
+  const raw = stored.trim();
+  if (!raw) return { inicio: "", fim: "" };
+  const parts = raw
+    .split(/\s*[–—-]\s*/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) {
+    return {
+      inicio: parseSingleTimeToken(parts[0] ?? ""),
+      fim: parseSingleTimeToken(parts[1] ?? ""),
+    };
+  }
+  const one = parseSingleTimeToken(parts[0] ?? raw);
+  return { inicio: one, fim: "" };
+}
+
+function formatPlantaoHorario(inicio: string, fim: string): string {
+  const i = inicio.trim();
+  const f = fim.trim();
+  if (!i && !f) return "";
+  if (i && f) return `${i}–${f}`;
+  return i || f;
+}
+
 function serialize(
   tipo: string,
   usuarioId: string,
@@ -61,7 +116,8 @@ function serialize(
   dataInicioFeriado: string,
   dataFimFeriado: string,
   dataPlantao: string,
-  horario: string,
+  horarioInicio: string,
+  horarioFim: string,
   dataInicioFerias: string,
   dataFimFerias: string
 ) {
@@ -72,18 +128,10 @@ function serialize(
     dataInicioFeriado,
     dataFimFeriado,
     dataPlantao,
-    horario,
+    horario: formatPlantaoHorario(horarioInicio, horarioFim),
     dataInicioFerias,
     dataFimFerias,
   });
-}
-
-function normalizeTipoKey(t: string | null): string {
-  return (t ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "");
 }
 
 function readInitial(
@@ -95,7 +143,8 @@ function readInitial(
   dataInicioFeriado: string;
   dataFimFeriado: string;
   dataPlantao: string;
-  horario: string;
+  horarioInicio: string;
+  horarioFim: string;
   dataInicioFerias: string;
   dataFimFerias: string;
 } {
@@ -107,7 +156,8 @@ function readInitial(
       dataInicioFeriado: "",
       dataFimFeriado: "",
       dataPlantao: "",
-      horario: "",
+      horarioInicio: "",
+      horarioFim: "",
       dataInicioFerias: "",
       dataFimFerias: "",
     };
@@ -118,6 +168,11 @@ function readInitial(
   const isFeriado = n === "coordenacao" || n === "feriado";
   let tipoOut = (initialEscala.tipo ?? "").trim();
   if (n === "coordenacao") tipoOut = ESCALA_TIPO_FERIADO;
+  const horarioStored = initialEscala.horario?.trim() ?? "";
+  const { inicio: horarioInicio, fim: horarioFim } =
+    n === "plantao"
+      ? parseStoredHorario(horarioStored)
+      : { inicio: "", fim: "" };
   return {
     tipo: tipoOut,
     usuarioId: initialEscala.usuario_id,
@@ -127,7 +182,8 @@ function readInitial(
     dataInicioFeriado: isFeriado ? di : "",
     dataFimFeriado: isFeriado ? (df || di) : "",
     dataPlantao: n === "plantao" ? di : "",
-    horario: initialEscala.horario?.trim() ?? "",
+    horarioInicio,
+    horarioFim,
     dataInicioFerias: n === "ferias" ? di : "",
     dataFimFerias: n === "ferias" ? df : "",
   };
@@ -171,7 +227,12 @@ export function EscalaForm({
   const [dataPlantao, setDataPlantao] = useState(
     () => readInitial(initialEscala).dataPlantao
   );
-  const [horario, setHorario] = useState(() => readInitial(initialEscala).horario);
+  const [horarioInicio, setHorarioInicio] = useState(
+    () => readInitial(initialEscala).horarioInicio
+  );
+  const [horarioFim, setHorarioFim] = useState(
+    () => readInitial(initialEscala).horarioFim
+  );
   const [dataInicioFerias, setDataInicioFerias] = useState(
     () => readInitial(initialEscala).dataInicioFerias
   );
@@ -184,7 +245,7 @@ export function EscalaForm({
   const [formError, setFormError] = useState<string | null>(null);
 
   const baselineRef = useRef<string>(
-    serialize("", "", "", "", "", "", "", "", "")
+    serialize("", "", "", "", "", "", "", "", "", "")
   );
 
   useLayoutEffect(() => {
@@ -195,7 +256,8 @@ export function EscalaForm({
       dataInicioFeriado,
       dataFimFeriado,
       dataPlantao,
-      horario,
+      horarioInicio,
+      horarioFim,
       dataInicioFerias,
       dataFimFerias
     );
@@ -267,7 +329,8 @@ export function EscalaForm({
     setDataInicioFeriado("");
     setDataFimFeriado("");
     setDataPlantao("");
-    setHorario("");
+    setHorarioInicio("");
+    setHorarioFim("");
     setDataInicioFerias("");
     setDataFimFerias("");
   }, []);
@@ -281,7 +344,8 @@ export function EscalaForm({
       dataInicioFeriado,
       dataFimFeriado,
       dataPlantao,
-      horario,
+      horarioInicio,
+      horarioFim,
       dataInicioFerias,
       dataFimFerias
     );
@@ -293,7 +357,8 @@ export function EscalaForm({
     dataInicioFeriado,
     dataFimFeriado,
     dataPlantao,
-    horario,
+    horarioInicio,
+    horarioFim,
     dataInicioFerias,
     dataFimFerias,
     onDirtyChange,
@@ -396,7 +461,7 @@ export function EscalaForm({
           data_inicio: dataPlantao.trim(),
           data_fim: null,
           coordenador: null,
-          horario: horario.trim() || null,
+          horario: formatPlantaoHorario(horarioInicio, horarioFim).trim() || null,
         };
       } else {
         row = {
@@ -427,7 +492,8 @@ export function EscalaForm({
         dataInicioFeriado,
         dataFimFeriado,
         dataPlantao,
-        horario,
+        horarioInicio,
+        horarioFim,
         dataInicioFerias,
         dataFimFerias
       );
@@ -442,7 +508,8 @@ export function EscalaForm({
       dataInicioFeriado,
       dataFimFeriado,
       dataPlantao,
-      horario,
+      horarioInicio,
+      horarioFim,
       dataInicioFerias,
       dataFimFerias,
       onSuccess,
@@ -608,23 +675,47 @@ export function EscalaForm({
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
             />
           </div>
-          <div>
-            <label
-              htmlFor={`${idPrefix}-horario`}
-              className="block text-sm font-medium text-slate-700"
-            >
+          <div className="space-y-2">
+            <div className="text-sm font-medium text-slate-700">
               Horário{" "}
               <span className="font-normal text-slate-500">(opcional)</span>
-            </label>
-            <input
-              id={`${idPrefix}-horario`}
-              type="text"
-              value={horario}
-              onChange={(e) => setHorario(e.target.value)}
-              disabled={formDisabled}
-              placeholder="Ex.: 08h–18h"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
-            />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label
+                  htmlFor={`${idPrefix}-horario-inicio`}
+                  className="block text-xs font-medium text-slate-600"
+                >
+                  Início
+                </label>
+                <input
+                  id={`${idPrefix}-horario-inicio`}
+                  type="time"
+                  step={60}
+                  value={horarioInicio}
+                  onChange={(e) => setHorarioInicio(e.target.value)}
+                  disabled={formDisabled}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor={`${idPrefix}-horario-fim`}
+                  className="block text-xs font-medium text-slate-600"
+                >
+                  Fim
+                </label>
+                <input
+                  id={`${idPrefix}-horario-fim`}
+                  type="time"
+                  step={60}
+                  value={horarioFim}
+                  onChange={(e) => setHorarioFim(e.target.value)}
+                  disabled={formDisabled}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+                />
+              </div>
+            </div>
           </div>
         </>
       )}
