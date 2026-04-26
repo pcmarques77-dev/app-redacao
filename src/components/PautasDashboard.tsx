@@ -716,10 +716,6 @@ function PautasCalendar({
     );
   };
 
-  /** @deprecated Use `renderCalendarioDiaCards`; kept for HMR/bundler caches that still reference the old name. */
-  const renderPautaList = (dayKey: string, _listClassName?: string) =>
-    renderCalendarioDiaCards(dayKey);
-
   const dayCellHandlers = (dayKey: string | null) => {
     if (!dayKey) {
       return {};
@@ -1424,7 +1420,9 @@ export function PautasDashboard() {
           )
         );
         if (targetIds.length === 1) {
-          const firstError = failed[0]?.upRes.error;
+          const failed0 = failed[0];
+          const firstError =
+            failed0 && failed0.upRes.ok === false ? failed0.upRes.error : undefined;
           setFeedbackErro(
             firstError === PAUTA_ACCESS_DENIED
               ? PAUTA_ACCESS_DENIED

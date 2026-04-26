@@ -261,7 +261,8 @@ export function EscalaForm({
       dataInicioFerias,
       dataFimFerias
     );
-    // Baseline inicial após hidratar estado (novo ou edição); alterações posteriores geram dirty.
+    // Baseline só no mount (form remonta via `key` ao trocar edição). Incluir deps zeraria o “dirty”.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only baseline
   }, []);
 
   useEffect(() => {
