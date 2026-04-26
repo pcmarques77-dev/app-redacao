@@ -328,6 +328,41 @@ function statusCalendarChipClass(status: PautaStatus | null): string {
   return `${base} border-slate-200 bg-slate-100 text-slate-700`;
 }
 
+function statusContextOptionClass(status: PautaStatus, active: boolean): string {
+  const n = normalizeStatus(status);
+  const base =
+    "block w-full rounded px-2 py-1.5 text-left text-sm transition-colors";
+  if (n === "sugerida") {
+    return `${base} ${
+      active
+        ? "bg-slate-200 font-semibold text-slate-900"
+        : "bg-slate-50 text-slate-700 hover:bg-slate-100"
+    }`;
+  }
+  if (n === "em producao") {
+    return `${base} ${
+      active
+        ? "bg-amber-200 font-semibold text-amber-900"
+        : "bg-amber-50 text-amber-800 hover:bg-amber-100"
+    }`;
+  }
+  if (n === "pronto") {
+    return `${base} ${
+      active
+        ? "bg-blue-200 font-semibold text-blue-900"
+        : "bg-blue-50 text-blue-800 hover:bg-blue-100"
+    }`;
+  }
+  if (n === "publicada") {
+    return `${base} ${
+      active
+        ? "bg-emerald-200 font-semibold text-emerald-900"
+        : "bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+    }`;
+  }
+  return `${base} ${active ? "bg-slate-100 font-semibold text-slate-900" : "text-slate-700 hover:bg-slate-50"}`;
+}
+
 function PautasCalendar({
   scope,
   monthAnchor,
@@ -343,6 +378,7 @@ function PautasCalendar({
   onDayClick,
   onEscalaCardClick,
   onPautaChipClick,
+  onPautaStatusChange,
   canManageDeadlineForPauta,
 }: {
   scope: "month" | "week";
@@ -359,6 +395,7 @@ function PautasCalendar({
   onDayClick?: (dayYmd: string) => void;
   onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
   onPautaChipClick?: (p: PautaRow) => void;
+  onPautaStatusChange?: (pautaId: string, status: PautaStatus) => void | Promise<void>;
   canManageDeadlineForPauta?: (p: PautaRow) => boolean;
 }) {
   const year = monthAnchor.getFullYear();
@@ -386,6 +423,29 @@ function PautasCalendar({
   });
 
   const [dropHighlightKey, setDropHighlightKey] = useState<string | null>(null);
+  const [statusContextMenu, setStatusContextMenu] = useState<{
+    pautaId: string;
+    x: number;
+    y: number;
+    currentStatus: PautaStatus;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!statusContextMenu) return;
+    const close = () => setStatusContextMenu(null);
+    const handleWindowClick = () => close();
+    const handleEsc = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") close();
+    };
+    window.addEventListener("click", handleWindowClick);
+    window.addEventListener("contextmenu", handleWindowClick);
+    window.addEventListener("keydown", handleEsc);
+    return () => {
+      window.removeEventListener("click", handleWindowClick);
+      window.removeEventListener("contextmenu", handleWindowClick);
+      window.removeEventListener("keydown", handleEsc);
+    };
+  }, [statusContextMenu]);
 
   const handleDragOverDay = useCallback(
     (e: DragEvent<HTMLDivElement>, dayKey: string) => {
@@ -598,6 +658,7 @@ function PautasCalendar({
 
           const p = item.pauta;
           const canDrag = canManageDeadlineForPauta?.(p) ?? false;
+          const canManagePautaStatus = canManageDeadlineForPauta?.(p) ?? false;
           return (
             <button
               key={key}
@@ -612,10 +673,35 @@ function PautasCalendar({
                 e.stopPropagation();
                 onPautaChipClick?.(p);
               }}
+              onContextMenu={(e) => {
+                if (!canManagePautaStatus) return;
+                e.preventDefault();
+                e.stopPropagation();
+                setStatusContextMenu({
+                  pautaId: p.id,
+                  x: e.clientX,
+                  y: e.clientY,
+                  currentStatus: p.status,
+                });
+              }}
               className={`${statusCalendarChipClass(p.status)} w-full text-left ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
             >
-              <span className="line-clamp-2">
-                {p.titulo_provisorio?.trim() || "Sem título"}
+              <span className="flex items-start justify-between gap-1">
+                <span className="line-clamp-2">
+                  {p.titulo_provisorio?.trim() || "Sem título"}
+                </span>
+                {canManagePautaStatus && (
+                  <span
+                    aria-hidden
+                    title="Clique com o botão direito para alterar status"
+                    className="mt-0.5 shrink-0 opacity-55"
+                  >
+                    ⋯
+                  </span>
+                )}
+              </span>
+              <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
+                {reporterNome(p)}
               </span>
               <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
                 {p.editoria?.trim() || "—"}
@@ -657,8 +743,9 @@ function PautasCalendar({
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+    <>
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
         <button
           type="button"
           onClick={scope === "month" ? onPrevMonth : onPrevWeek}
@@ -676,10 +763,10 @@ function PautasCalendar({
         >
           {scope === "month" ? "Próximo mês →" : "Próxima semana →"}
         </button>
-      </div>
-      {controlsContent}
-      {scope === "month" ? (
-        <>
+        </div>
+        {controlsContent}
+        {scope === "month" ? (
+          <>
           <div className="grid grid-cols-7 gap-px border-b border-slate-200 bg-slate-200">
             {weekLabels.map((w) => (
               <div
@@ -717,9 +804,9 @@ function PautasCalendar({
               );
             })}
           </div>
-        </>
-      ) : (
-        <>
+          </>
+        ) : (
+          <>
           <div className="grid grid-cols-7 gap-px border-b border-slate-200 bg-slate-200">
             {Array.from({ length: 7 }, (_, i) => {
               const d = addDaysLocal(weekStart, i);
@@ -760,16 +847,45 @@ function PautasCalendar({
               );
             })}
           </div>
-        </>
+          </>
+        )}
+      </div>
+      {statusContextMenu && (
+        <div
+          className="fixed z-[70] min-w-[180px] rounded-md border border-slate-200 bg-white p-1 shadow-lg"
+          style={{
+            left: Math.max(8, statusContextMenu.x - 10),
+            top: Math.max(8, statusContextMenu.y - 10),
+          }}
+          onClick={(ev) => ev.stopPropagation()}
+          onContextMenu={(ev) => ev.preventDefault()}
+        >
+          {STATUS_OPTIONS.map(({ value, label }) => {
+            const active = statusContextMenu.currentStatus === value;
+            return (
+              <button
+                key={`ctx-status-${value}`}
+                type="button"
+                onClick={() => {
+                  void onPautaStatusChange?.(statusContextMenu.pautaId, value);
+                  setStatusContextMenu(null);
+                }}
+                className={statusContextOptionClass(value, active)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       )}
-    </div>
+    </>
   );
 }
 
 function statusSelectClassName(status: PautaStatus | null): string {
   const n = normalizeStatus(status);
   const base =
-    "w-full min-w-[9.5rem] max-w-full rounded-md border px-2 py-1.5 text-xs font-medium shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-[12rem]";
+    "w-full min-w-[9.5rem] max-w-full rounded-md border py-1.5 pl-2 pr-[10px] text-xs font-medium shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60 sm:max-w-[12rem]";
   if (n === "sugerida") return `${base} border-slate-200 bg-slate-100 text-slate-700`;
   if (n === "em producao") return `${base} border-amber-200 bg-amber-100 text-amber-800`;
   if (n === "pronto") return `${base} border-blue-200 bg-blue-100 text-blue-800`;
@@ -834,6 +950,7 @@ export function PautasDashboard() {
   const router = useRouter();
   const [pautas, setPautas] = useState<PautaRow[]>([]);
   const [escalas, setEscalas] = useState<EscalaRow[]>([]);
+  const [usuariosFiltro, setUsuariosFiltro] = useState<ModalReporterOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<SortColumn>("prazo");
@@ -935,13 +1052,11 @@ export function PautasDashboard() {
   }, [editingEscala]);
 
   const opcoesReporters = useMemo(() => {
-    const set = new Set<string>();
-    for (const p of pautas) {
-      const n = p.reporter?.nome?.trim();
-      if (n) set.add(n);
-    }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
-  }, [pautas]);
+    const nomes = usuariosFiltro
+      .map((u) => u.nome?.trim() ?? "")
+      .filter((nome) => nome.length > 0);
+    return nomes.sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [usuariosFiltro]);
 
   const opcoesEditorias = useMemo(() => {
     const set = new Set<string>();
@@ -1027,6 +1142,15 @@ export function PautasDashboard() {
     [sortedPautas, canManagePauta]
   );
 
+  const selecionadasGerenciaveis = useMemo(() => {
+    if (selecionadas.length === 0) return [];
+    const byId = new Map(pautas.map((p) => [p.id, p]));
+    return selecionadas.filter((id) => {
+      const p = byId.get(id);
+      return p ? canManagePauta(p) : false;
+    });
+  }, [selecionadas, pautas, canManagePauta]);
+
   useEffect(() => {
     const el = selectAllRef.current;
     if (!el) return;
@@ -1058,7 +1182,12 @@ export function PautasDashboard() {
   );
 
   const fetchDashboardData = useCallback(async (): Promise<
-    | { ok: true; pautas: PautaRow[]; escalas: EscalaRow[] }
+    | {
+        ok: true;
+        pautas: PautaRow[];
+        escalas: EscalaRow[];
+        usuarios: ModalReporterOption[];
+      }
     | { ok: false; error: string }
   > => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -1071,7 +1200,7 @@ export function PautasDashboard() {
       };
     }
     const supabase = createBrowserClient();
-    const [pautaResult, eRes] = await Promise.all([
+    const [pautaResult, eRes, usuariosRes] = await Promise.all([
       listPautasDashboardAction(),
       supabase
         .from("escalas")
@@ -1088,6 +1217,7 @@ export function PautasDashboard() {
       `
         )
         .order("data_inicio", { ascending: true }),
+      supabase.from("usuarios").select("id, nome").order("nome", { ascending: true }),
     ]);
 
     if (!pautaResult.ok) {
@@ -1099,10 +1229,14 @@ export function PautasDashboard() {
     const escalas: EscalaRow[] = eRes.error
       ? []
       : ((eRes.data ?? []) as unknown as EscalaRow[]);
+    const usuarios: ModalReporterOption[] = usuariosRes.error
+      ? []
+      : ((usuariosRes.data ?? []) as ModalReporterOption[]);
     return {
       ok: true,
       pautas: pautaResult.rows as PautaRow[],
       escalas,
+      usuarios,
     };
   }, []);
 
@@ -1114,9 +1248,11 @@ export function PautasDashboard() {
       setError(res.error);
       setPautas([]);
       setEscalas([]);
+      setUsuariosFiltro([]);
     } else {
       setPautas(res.pautas);
       setEscalas(res.escalas);
+      setUsuariosFiltro(res.usuarios);
     }
     setLoading(false);
   }, [fetchDashboardData]);
@@ -1133,6 +1269,7 @@ export function PautasDashboard() {
     }
     setPautas(res.pautas);
     setEscalas(res.escalas);
+    setUsuariosFiltro(res.usuarios);
   }, [fetchDashboardData]);
 
   useEffect(() => {
@@ -1247,19 +1384,76 @@ export function PautasDashboard() {
 
   const handleStatusChange = useCallback(
     async (id: string, newStatus: PautaStatus) => {
+      const selectedTargets = selecionadasGerenciaveis.includes(id)
+        ? selecionadasGerenciaveis
+        : [];
+      const targetIds = selectedTargets.length > 0 ? selectedTargets : [id];
+      const targetSet = new Set(targetIds);
+      const previousStatusById = new Map(
+        pautas
+          .filter((p) => targetSet.has(p.id))
+          .map((p) => [p.id, p.status] as const)
+      );
+
+      if (targetIds.length === 1) {
+        setFeedbackErro(null);
+      }
+
+      setPautas((rows) =>
+        rows.map((p) => (targetSet.has(p.id) ? { ...p, status: newStatus } : p))
+      );
+      setStatusSavingId(id);
+
+      const results = await Promise.all(
+        targetIds.map(async (targetId) => {
+          const upRes = await updatePautaAction(targetId, { status: newStatus });
+          return { id: targetId, upRes };
+        })
+      );
+
+      setStatusSavingId(null);
+
+      const failed = results.filter((r) => !r.upRes.ok);
+      if (failed.length > 0) {
+        const failedIds = new Set(failed.map((r) => r.id));
+        setPautas((rows) =>
+          rows.map((p) =>
+            failedIds.has(p.id)
+              ? { ...p, status: previousStatusById.get(p.id) ?? p.status }
+              : p
+          )
+        );
+        if (targetIds.length === 1) {
+          const firstError = failed[0]?.upRes.error;
+          setFeedbackErro(
+            firstError === PAUTA_ACCESS_DENIED
+              ? PAUTA_ACCESS_DENIED
+              : firstError || "Não foi possível atualizar o status."
+          );
+        }
+      }
+    },
+    [pautas, selecionadasGerenciaveis]
+  );
+
+  const handleCalendarStatusChange = useCallback(
+    async (id: string, newStatus: PautaStatus) => {
       setFeedbackErro(null);
-      let previous: PautaStatus = "Sugerida";
-      setPautas((ps) => {
-        const hit = ps.find((p) => p.id === id);
-        if (hit) previous = hit.status;
-        return ps.map((p) => (p.id === id ? { ...p, status: newStatus } : p));
-      });
+      const row = pautas.find((p) => p.id === id);
+      if (!row) return;
+      const previous = row.status;
+      if (previous === newStatus) return;
+
+      setPautas((rows) =>
+        rows.map((p) => (p.id === id ? { ...p, status: newStatus } : p))
+      );
       setStatusSavingId(id);
       const upRes = await updatePautaAction(id, { status: newStatus });
       setStatusSavingId(null);
+
       if (!upRes.ok) {
-        setPautas((ps) =>
-          ps.map((p) => (p.id === id ? { ...p, status: previous } : p))
+        setPautas((rows) =>
+          rows.map((p) => (p.id === id ? { ...p, status: previous } : p))
         );
         setFeedbackErro(
           upRes.error === PAUTA_ACCESS_DENIED
@@ -1268,7 +1462,7 @@ export function PautasDashboard() {
         );
       }
     },
-    []
+    [pautas]
   );
 
   const handleDeadlineChange = useCallback(
@@ -1512,9 +1706,9 @@ export function PautasDashboard() {
           id="filtro-reporter"
           value={filtroReporter}
           onChange={(e) => setFiltroReporter(e.target.value)}
-          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 md:w-56"
+          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white py-2.5 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 md:w-56"
         >
-          <option value="Todos">Todos os Repórteres</option>
+          <option value="Todos">Todos os Jornalistas</option>
           {opcoesReporters.map((nome) => (
             <option key={nome} value={nome}>
               {nome}
@@ -1525,7 +1719,7 @@ export function PautasDashboard() {
           id="filtro-editoria"
           value={filtroEditoria}
           onChange={(e) => setFiltroEditoria(e.target.value)}
-          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 md:w-56"
+          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white py-2.5 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 md:w-56"
         >
           <option value="Todos">Todas as Editorias</option>
           {opcoesEditorias.map((ed) => (
@@ -1792,7 +1986,7 @@ export function PautasDashboard() {
                     </th>
                     <SortColumnHeader
                       column="reporter"
-                      label="Repórter"
+                      label="Jornalista"
                       sortColumn={sortColumn}
                       sortDirection={sortDirection}
                       onSort={handleSort}
@@ -1921,7 +2115,7 @@ export function PautasDashboard() {
                 <dl className="space-y-3 text-sm">
                   <div>
                     <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Repórter
+                      Jornalista
                     </dt>
                     <dd className="mt-0.5 text-slate-900">
                       {reporterNome(p)}
@@ -2021,6 +2215,7 @@ export function PautasDashboard() {
               onDayClick={handleCalendarDayClick}
               onEscalaCardClick={handleEscalaCardClick}
               onPautaChipClick={handleCalendarioPautaChipClick}
+              onPautaStatusChange={handleCalendarStatusChange}
               canManageDeadlineForPauta={canManagePauta}
             />
           )}
@@ -2200,7 +2395,7 @@ export function PautasDashboard() {
                           modalReportersLoading ||
                           modalReporters.length === 0
                         }
-                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                        className="mt-1 w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
                       >
                         <option value="">Selecione…</option>
                         {modalReporters.map((r) => (
@@ -2234,7 +2429,7 @@ export function PautasDashboard() {
                       value={modalEditoria}
                       onChange={(e) => setModalEditoria(e.target.value)}
                       disabled={modalSaving}
-                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
                     >
                       {EDITORIA_OPTIONS.map((ed) => (
                         <option key={ed} value={ed}>
@@ -2447,7 +2642,7 @@ export function PautasDashboard() {
                   id="cal-sl-status"
                   value={pautaCalendarioSomenteLeitura.status}
                   disabled
-                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 opacity-90"
+                  className="mt-1 w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 py-2 pl-3 pr-[10px] text-sm text-slate-700 opacity-90"
                 >
                   {STATUS_OPTIONS.map(({ value, label }) => (
                     <option key={value} value={value}>

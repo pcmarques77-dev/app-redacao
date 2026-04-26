@@ -668,7 +668,7 @@ export default function EditarPauta() {
                     value={editoria}
                     onChange={(ev) => setEditoria(ev.target.value)}
                     disabled={!editable}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                   >
                     {EDITORIA_OPTIONS.map((opt) => (
                       <option key={opt} value={opt}>
@@ -682,7 +682,7 @@ export default function EditarPauta() {
                     htmlFor="edit-reporter"
                     className="block text-sm font-medium text-slate-700"
                   >
-                    Repórter
+                    Jornalista
                   </label>
                   <select
                     id="edit-reporter"
@@ -691,9 +691,9 @@ export default function EditarPauta() {
                     onChange={(ev) => setReporterId(ev.target.value)}
                     required
                     disabled={!editable || reporters.length === 0}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                   >
-                    <option value="">Selecione o repórter</option>
+                    <option value="">Selecione o jornalista</option>
                     {reporters.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.nome?.trim() || "Sem nome"}
@@ -827,7 +827,7 @@ export default function EditarPauta() {
                     value={status}
                     onChange={(ev) => setStatus(ev.target.value as PautaStatus)}
                     disabled={!editable}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                   >
                     {STATUS_OPTIONS.map(({ value, label }) => (
                       <option key={value} value={value}>

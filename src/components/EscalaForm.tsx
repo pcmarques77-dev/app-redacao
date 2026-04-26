@@ -296,7 +296,7 @@ export function EscalaForm({
       if (cancelled) return;
       setLoadingUsers(false);
       if (qErr) {
-        setUsersError(qErr.message || "Não foi possível carregar os repórteres.");
+        setUsersError(qErr.message || "Não foi possível carregar os jornalistas.");
         setUsuarios([]);
         return;
       }
@@ -401,7 +401,7 @@ export function EscalaForm({
         return;
       }
       if (!usuarioId.trim()) {
-        setFormError("Selecione um repórter.");
+        setFormError("Selecione um jornalista.");
         return;
       }
 
@@ -554,7 +554,7 @@ export function EscalaForm({
           onChange={(e) => handleTipoChange(e.target.value)}
           disabled={formDisabled}
           required
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
+          className="mt-1 w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
         >
           <option value="">Selecione…</option>
           <option value={ESCALA_TIPO_FERIADO}>{ESCALA_TIPO_FERIADO}</option>
@@ -568,7 +568,7 @@ export function EscalaForm({
           htmlFor={`${idPrefix}-usuario`}
           className="block text-sm font-medium text-slate-700"
         >
-          Repórter
+          Jornalista
         </label>
         {loadingUsers && (
           <p className="mt-1 text-xs text-slate-500">Carregando…</p>
@@ -582,7 +582,7 @@ export function EscalaForm({
           onChange={(e) => setUsuarioId(e.target.value)}
           disabled={formDisabled || loadingUsers || usuarios.length === 0}
           required
-          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+          className="mt-1 w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
         >
           <option value="">Selecione…</option>
           {usuarios.map((u) => (

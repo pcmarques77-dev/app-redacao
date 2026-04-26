@@ -553,7 +553,7 @@ export default function NovaPautaPage() {
                     name="editoria"
                     value={editoria}
                     onChange={(ev) => setEditoria(ev.target.value)}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
                   >
                     {EDITORIA_OPTIONS.map((opt) => (
                       <option key={opt} value={opt}>
@@ -568,7 +568,7 @@ export default function NovaPautaPage() {
                       htmlFor="reporter-id"
                       className="block text-sm font-medium text-slate-700"
                     >
-                      Repórter
+                      Jornalista
                     </label>
                     <select
                       id="reporter-id"
@@ -576,9 +576,9 @@ export default function NovaPautaPage() {
                       value={reporterId}
                       onChange={(ev) => setReporterId(ev.target.value)}
                       required
-                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
                     >
-                      <option value="">Selecione o repórter</option>
+                      <option value="">Selecione o jornalista</option>
                       {reporters.map((r) => (
                         <option key={r.id} value={r.id}>
                           {r.nome?.trim() || "Sem nome"}
@@ -588,7 +588,7 @@ export default function NovaPautaPage() {
                   </div>
                 ) : (
                   <p className="text-sm text-slate-600">
-                    Esta pauta será atribuída a você como repórter.
+                    Esta pauta será atribuída a você como jornalista.
                   </p>
                 )}
                 <div>
@@ -724,7 +724,7 @@ export default function NovaPautaPage() {
                     name="status"
                     value={status}
                     onChange={(ev) => setStatus(ev.target.value as PautaStatus)}
-                    className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+                    className="mt-1 w-full rounded-md border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
                   >
                     {STATUS_OPTIONS.map(({ value, label }) => (
                       <option key={value} value={value}>
