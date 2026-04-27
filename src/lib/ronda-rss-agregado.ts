@@ -1,6 +1,13 @@
 import Parser from "rss-parser";
 
-export const RONDA_RSS_FEEDS: { rssUrl: string; fonte: string }[] = [
+/** Um feed lógico por fonte; `rssFallbackUrls` são tentados em ordem até completar o limite de itens. */
+export type RondaRssFeedConfig = {
+  fonte: string;
+  rssUrl: string;
+  rssFallbackUrls?: string[];
+};
+
+export const RONDA_RSS_FEEDS: RondaRssFeedConfig[] = [
   {
     rssUrl: "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml",
     fonte: "Agência Brasil",
@@ -16,6 +23,13 @@ export const RONDA_RSS_FEEDS: { rssUrl: string; fonte: string }[] = [
   {
     rssUrl: "https://www.camara.leg.br/noticias/rss/ultimas-noticias",
     fonte: "Câmara dos Deputados",
+    /** O feed “últimas” do portal às vezes vem sem `<item>`; os temáticos seguem populados. */
+    rssFallbackUrls: [
+      "https://www.camara.leg.br/noticias/rss/dinamico/POLITICA",
+      "https://www.camara.leg.br/noticias/rss/dinamico/ECONOMIA",
+      "https://www.camara.leg.br/noticias/rss/dinamico/TRABALHO-E-PREVIDENCIA",
+      "https://www.camara.leg.br/noticias/rss/dinamico/SAUDE",
+    ],
   },
   {
     rssUrl: "https://www12.senado.leg.br/noticias/RSS",
@@ -68,7 +82,8 @@ async function extrairItensRss(
   xml: string,
   fonte: string,
   baseUrl: string,
-  nextPuxada: () => { ordem: number; data_publicacao: string }
+  nextPuxada: () => { ordem: number; data_publicacao: string },
+  maxItens: number = ITENS_POR_FONTE
 ): Promise<ItemRonda[]> {
   const trimmed = xml.trim();
   if (!trimmed || !trimmed.startsWith("<")) {
@@ -89,7 +104,7 @@ async function extrairItensRss(
 
   const out: ItemRonda[] = [];
   for (const item of feed.items ?? []) {
-    if (out.length >= ITENS_POR_FONTE) break;
+    if (out.length >= maxItens) break;
     const titulo = item.title?.replace(/\s+/g, " ").trim();
     const href = item.link?.trim();
     if (!titulo || !href) continue;
@@ -136,7 +151,66 @@ function ordenarComoRonda(a: ItemRonda, b: ItemRonda): number {
   return b.ordem - a.ordem;
 }
 
-export async function agregarRondaRss(): Promise<{
+async function buscarCorpoRss(
+  rssUrl: string,
+  fonte: string
+): Promise<{ text: string | null; baseUrl: string }> {
+  let baseUrl: string;
+  try {
+    baseUrl = new URL(rssUrl).origin;
+  } catch {
+    console.error(`[ronda-rss] URL inválida (${fonte}):`, rssUrl);
+    return { text: null, baseUrl: "" };
+  }
+  try {
+    const res = await fetch(rssUrl, {
+      headers: FETCH_HEADERS,
+      redirect: "follow",
+    });
+    if (!res.ok) {
+      console.error(`[ronda-rss] HTTP ${res.status} (${fonte}) — ${rssUrl}`);
+      return { text: null, baseUrl };
+    }
+    const text = await res.text();
+    return { text, baseUrl };
+  } catch (e) {
+    console.error(`[ronda-rss] Falha ao buscar (${fonte}) — ${rssUrl}:`, e);
+    return { text: null, baseUrl };
+  }
+}
+
+async function coletarItensUmaFonte(
+  config: RondaRssFeedConfig,
+  nextPuxada: () => { ordem: number; data_publicacao: string }
+): Promise<ItemRonda[]> {
+  const urls = [config.rssUrl, ...(config.rssFallbackUrls ?? [])];
+  const merged: ItemRonda[] = [];
+  const vistos = new Set<string>();
+
+  for (const url of urls) {
+    if (merged.length >= ITENS_POR_FONTE) break;
+    const { text, baseUrl } = await buscarCorpoRss(url, config.fonte);
+    if (!text || !baseUrl) continue;
+    const itens = await extrairItensRss(
+      text,
+      config.fonte,
+      baseUrl,
+      nextPuxada,
+      ITENS_POR_FONTE
+    );
+    for (const it of itens) {
+      if (vistos.has(it.link)) continue;
+      vistos.add(it.link);
+      merged.push(it);
+      if (merged.length >= ITENS_POR_FONTE) break;
+    }
+  }
+
+  return merged;
+}
+
+/** Resposta JSON do Radar de Pautas (`/api/ronda-rss`) e do snapshot no Supabase. */
+export type RondaRssAgregadoOk = {
   ok: true;
   noticias: {
     titulo: string;
@@ -146,42 +220,14 @@ export async function agregarRondaRss(): Promise<{
     publicado_em: string | null;
   }[];
   total: number;
-}> {
-  const fetched = await Promise.all(
-    RONDA_RSS_FEEDS.map(async ({ rssUrl, fonte }) => {
-      let baseUrl: string;
-      try {
-        baseUrl = new URL(rssUrl).origin;
-      } catch {
-        console.error(`[ronda-rss] URL inválida (${fonte}):`, rssUrl);
-        return { fonte, html: null as string | null, baseUrl: "" };
-      }
-      try {
-        const res = await fetch(rssUrl, {
-          headers: FETCH_HEADERS,
-          redirect: "follow",
-        });
-        if (!res.ok) {
-          console.error(`[ronda-rss] HTTP ${res.status} (${fonte}) — ${rssUrl}`);
-          return { fonte, html: null, baseUrl };
-        }
-        const html = await res.text();
-        return { fonte, html, baseUrl };
-      } catch (e) {
-        console.error(`[ronda-rss] Falha ao buscar (${fonte}) — ${rssUrl}:`, e);
-        return { fonte, html: null, baseUrl };
-      }
-    })
-  );
+};
 
-  const todasNoticias: ItemRonda[] = [];
+export async function agregarRondaRss(): Promise<RondaRssAgregadoOk> {
   const nextPuxada = criarSequenciaPuxada();
-
-  for (const { fonte, html, baseUrl } of fetched) {
-    if (!html || !baseUrl) continue;
-    const itens = await extrairItensRss(html, fonte, baseUrl, nextPuxada);
-    todasNoticias.push(...itens);
-  }
+  const porFonte = await Promise.all(
+    RONDA_RSS_FEEDS.map((config) => coletarItensUmaFonte(config, nextPuxada))
+  );
+  const todasNoticias = porFonte.flat();
 
   todasNoticias.sort(ordenarComoRonda);
 
