@@ -11,6 +11,19 @@
 import { createClient } from "@supabase/supabase-js";
 import { agregarRondaRss } from "../src/lib/ronda-rss-agregado";
 
+/** Remove CRLF, espaços e aspas que `.env` copiado do Windows costuma trazer. */
+function cleanEnvValue(raw: string | undefined): string {
+  if (raw == null) return "";
+  let s = raw.replace(/\r\n/g, "\n").replace(/\r/g, "").trim();
+  if (
+    (s.startsWith('"') && s.endsWith('"')) ||
+    (s.startsWith("'") && s.endsWith("'"))
+  ) {
+    s = s.slice(1, -1).trim();
+  }
+  return s;
+}
+
 /** URL da API do projeto (Settings → API → Project URL), ex.: https://abcdefgh.supabase.co */
 function assertSupabaseApiUrl(url: string) {
   const u = url.replace(/\/$/, "");
@@ -26,10 +39,10 @@ function assertSupabaseApiUrl(url: string) {
 }
 
 async function main() {
-  const url =
-    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-    process.env.SUPABASE_URL?.trim();
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const url = cleanEnvValue(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+  );
+  const key = cleanEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   if (!url || !key) {
     console.error(
@@ -41,7 +54,8 @@ async function main() {
   assertSupabaseApiUrl(url);
 
   const payload = await agregarRondaRss();
-  const supabase = createClient(url, key);
+  const apiUrl = url.replace(/\/$/, "");
+  const supabase = createClient(apiUrl, key);
 
   const { error } = await supabase.from("ronda_rss_snapshot").upsert(
     {
