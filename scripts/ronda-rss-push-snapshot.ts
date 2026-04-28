@@ -24,6 +24,20 @@ function cleanEnvValue(raw: string | undefined): string {
   return s;
 }
 
+/** Corrige valor onde colaram por engano `NOME_VAR=...` outra vez dentro do valor. */
+function normalizeSupabaseUrlFromEnv(raw: string | undefined): string {
+  let s = cleanEnvValue(raw);
+  s = s.replace(/^NEXT_PUBLIC_SUPABASE_URL\s*=\s*/i, "");
+  s = s.replace(/^SUPABASE_URL\s*=\s*/i, "");
+  return s.trim();
+}
+
+function normalizeServiceKeyFromEnv(raw: string | undefined): string {
+  let s = cleanEnvValue(raw);
+  s = s.replace(/^SUPABASE_SERVICE_ROLE_KEY\s*=\s*/i, "");
+  return s.trim();
+}
+
 /** URL da API do projeto (Settings → API → Project URL), ex.: https://abcdefgh.supabase.co */
 function assertSupabaseApiUrl(url: string) {
   const u = url.replace(/\/$/, "");
@@ -31,18 +45,19 @@ function assertSupabaseApiUrl(url: string) {
   if (ok) return;
   console.error(
     "[ronda-rss-push-snapshot] NEXT_PUBLIC_SUPABASE_URL inválida para a API REST.\n" +
-      "Use exatamente o \"Project URL\" do painel: https://<ref>.supabase.co\n" +
-      "Não use link do Dashboard (supabase.com/dashboard), nem /project/… .\n" +
-      `Valor atual (primeiros 80 chars): ${url.slice(0, 80)}`
+      "No .env.ronda cada linha deve ser só: NOME=valor (sem repetir o nome no valor).\n" +
+      "Ex.: NEXT_PUBLIC_SUPABASE_URL=https://abcdefgh.supabase.co\n" +
+      "Use o \"Project URL\" do painel (https://<ref>.supabase.co).\n" +
+      `Valor atual (primeiros 100 chars): ${url.slice(0, 100)}`
   );
   process.exit(1);
 }
 
 async function main() {
-  const url = cleanEnvValue(
+  const url = normalizeSupabaseUrlFromEnv(
     process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
   );
-  const key = cleanEnvValue(process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const key = normalizeServiceKeyFromEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
   if (!url || !key) {
     console.error(
