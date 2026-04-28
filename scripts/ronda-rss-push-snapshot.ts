@@ -11,6 +11,20 @@
 import { createClient } from "@supabase/supabase-js";
 import { agregarRondaRss } from "../src/lib/ronda-rss-agregado";
 
+/** URL da API do projeto (Settings → API → Project URL), ex.: https://abcdefgh.supabase.co */
+function assertSupabaseApiUrl(url: string) {
+  const u = url.replace(/\/$/, "");
+  const ok = /^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(u);
+  if (ok) return;
+  console.error(
+    "[ronda-rss-push-snapshot] NEXT_PUBLIC_SUPABASE_URL inválida para a API REST.\n" +
+      "Use exatamente o \"Project URL\" do painel: https://<ref>.supabase.co\n" +
+      "Não use link do Dashboard (supabase.com/dashboard), nem /project/… .\n" +
+      `Valor atual (primeiros 80 chars): ${url.slice(0, 80)}`
+  );
+  process.exit(1);
+}
+
 async function main() {
   const url =
     process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
@@ -23,6 +37,8 @@ async function main() {
     );
     process.exit(1);
   }
+
+  assertSupabaseApiUrl(url);
 
   const payload = await agregarRondaRss();
   const supabase = createClient(url, key);
@@ -37,7 +53,12 @@ async function main() {
   );
 
   if (error) {
-    console.error("[ronda-rss-push-snapshot]", error.message);
+    const msg = error.message?.replace(/\s+/g, " ").trim() ?? "";
+    const short =
+      msg.length > 240 || msg.includes("<!DOCTYPE")
+        ? `${msg.slice(0, 200)}… (resposta parece HTML — confira Project URL e service_role)`
+        : msg;
+    console.error("[ronda-rss-push-snapshot]", short);
     process.exit(1);
   }
 
