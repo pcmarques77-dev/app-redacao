@@ -16,6 +16,14 @@ export const LOGO_URL_POR_FONTE: Record<string, string> = {
     "https://www.gov.br/previdencia/pt-br/favicon.ico",
   "Agência SP": "https://www.agenciasp.sp.gov.br/favicon.ico",
   STF: "https://portal.stf.jus.br/assets/img/logo-STF.png",
+  TudoCelular: "https://www.tudocelular.com/favicon.ico",
+  "G1 Tecnologia": "https://g1.globo.com/favicon.ico",
+  "Folha — Tecnologia": "https://www.folha.uol.com.br/favicon.ico",
+  TecMundo: "https://www.tecmundo.com.br/favicon.ico",
+  TechTudo: "https://www.techtudo.com.br/favicon.ico",
+  Canaltech: "https://canaltech.com.br/favicon.ico",
+  Tecnoblog: "https://tecnoblog.net/favicon.ico",
+  "Olhar Digital": "https://olhardigital.com.br/favicon.ico",
 };
 
 export function logoUrlDaFonte(fonte: string): string | undefined {

@@ -1,5 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
-import type { RondaRssAgregadoOk } from "@/lib/ronda-rss-agregado";
+import type { RondaRssAgregadoOk, RondaRssKind } from "@/lib/ronda-rss-agregado";
+
+export const RONDA_RSS_SNAPSHOT_ROW: Record<RondaRssKind, number> = {
+  gov: 1,
+  tech: 2,
+};
 
 function parsePayload(raw: unknown): RondaRssAgregadoOk | null {
   if (!raw || typeof raw !== "object") return null;
@@ -29,14 +34,18 @@ function createAdmin() {
 }
 
 /** Lê o snapshot gravado pelo scraper no Linux (`ronda_rss_snapshot`). */
-export async function readRondaRssSnapshotFromDb(): Promise<RondaRssAgregadoOk | null> {
+export async function readRondaRssSnapshotFromDb(
+  kind: RondaRssKind = "gov"
+): Promise<RondaRssAgregadoOk | null> {
   const supabase = createAdmin();
   if (!supabase) return null;
+
+  const id = RONDA_RSS_SNAPSHOT_ROW[kind];
 
   const { data, error } = await supabase
     .from("ronda_rss_snapshot")
     .select("payload")
-    .eq("id", 1)
+    .eq("id", id)
     .maybeSingle();
 
   if (error) {

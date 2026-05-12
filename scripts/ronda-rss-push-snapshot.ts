@@ -5,11 +5,17 @@
  *   export SUPABASE_SERVICE_ROLE_KEY="eyJ..."
  *   npm run ronda:push-snapshot
  *
+ * Grava dois registros: id 1 (Ronda Gov) e id 2 (Ronda Tech), na tabela `ronda_rss_snapshot`.
+ *
  * Exemplo cron (a cada 10 min):
  *   0,10,20,30,40,50 * * * * cd /opt/app-redacao && . ./.env.ronda && npm run ronda:push-snapshot >> /var/log/ronda-rss.log 2>&1
  */
 import { createClient } from "@supabase/supabase-js";
-import { agregarRondaRss } from "../src/lib/ronda-rss-agregado";
+import {
+  agregarRondaRss,
+  type RondaRssKind,
+} from "../src/lib/ronda-rss-agregado";
+import { RONDA_RSS_SNAPSHOT_ROW } from "../src/lib/ronda-rss-snapshot";
 
 /** Remove CRLF, espaços e aspas que `.env` copiado do Windows costuma trazer. */
 function cleanEnvValue(raw: string | undefined): string {
@@ -68,32 +74,38 @@ async function main() {
 
   assertSupabaseApiUrl(url);
 
-  const payload = await agregarRondaRss();
   const apiUrl = url.replace(/\/$/, "");
   const supabase = createClient(apiUrl, key);
 
-  const { error } = await supabase.from("ronda_rss_snapshot").upsert(
-    {
-      id: 1,
-      payload,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "id" }
-  );
+  const kinds: RondaRssKind[] = ["gov", "tech"];
 
-  if (error) {
-    const msg = error.message?.replace(/\s+/g, " ").trim() ?? "";
-    const short =
-      msg.length > 240 || msg.includes("<!DOCTYPE")
-        ? `${msg.slice(0, 200)}… (resposta parece HTML — confira Project URL e service_role)`
-        : msg;
-    console.error("[ronda-rss-push-snapshot]", short);
-    process.exit(1);
+  for (const kind of kinds) {
+    const payload = await agregarRondaRss(kind);
+    const id = RONDA_RSS_SNAPSHOT_ROW[kind];
+
+    const { error } = await supabase.from("ronda_rss_snapshot").upsert(
+      {
+        id,
+        payload,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
+
+    if (error) {
+      const msg = error.message?.replace(/\s+/g, " ").trim() ?? "";
+      const short =
+        msg.length > 240 || msg.includes("<!DOCTYPE")
+          ? `${msg.slice(0, 200)}… (resposta parece HTML — confira Project URL e service_role)`
+          : msg;
+      console.error(`[ronda-rss-push-snapshot] ${kind} (id ${id}):`, short);
+      process.exit(1);
+    }
+
+    console.log(
+      `[ronda-rss-push-snapshot] ok ${kind} — ${payload.total} itens em ${new Date().toISOString()}`
+    );
   }
-
-  console.log(
-    `[ronda-rss-push-snapshot] ok — ${payload.total} itens em ${new Date().toISOString()}`
-  );
 }
 
 void main();

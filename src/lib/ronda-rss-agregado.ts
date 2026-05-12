@@ -7,7 +7,9 @@ export type RondaRssFeedConfig = {
   rssFallbackUrls?: string[];
 };
 
-export const RONDA_RSS_FEEDS: RondaRssFeedConfig[] = [
+export type RondaRssKind = "gov" | "tech";
+
+export const RONDA_RSS_FEEDS_GOV: RondaRssFeedConfig[] = [
   {
     rssUrl: "https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml",
     fonte: "Agência Brasil",
@@ -36,6 +38,50 @@ export const RONDA_RSS_FEEDS: RondaRssFeedConfig[] = [
     fonte: "Senado Federal",
   },
 ];
+
+/** Alias histórico: mesma lista que `RONDA_RSS_FEEDS_GOV`. */
+export const RONDA_RSS_FEEDS = RONDA_RSS_FEEDS_GOV;
+
+/** Feed principal do TudoCelular (`/rss.xml` 404); usa o XML do site. */
+export const RONDA_RSS_FEEDS_TECH: RondaRssFeedConfig[] = [
+  {
+    rssUrl: "https://www.tudocelular.com/feed/",
+    fonte: "TudoCelular",
+  },
+  {
+    rssUrl: "https://g1.globo.com/rss/g1/tecnologia/",
+    fonte: "G1 Tecnologia",
+  },
+  {
+    rssUrl: "https://feeds.folha.uol.com.br/tec/rss091.xml",
+    fonte: "Folha — Tecnologia",
+  },
+  {
+    rssUrl: "https://rss.tecmundo.com.br/feed",
+    fonte: "TecMundo",
+  },
+  {
+    rssUrl: "https://www.techtudo.com.br/rss/techtudo/",
+    fonte: "TechTudo",
+  },
+  {
+    rssUrl: "https://canaltech.com.br/RSS/",
+    fonte: "Canaltech",
+  },
+  {
+    rssUrl: "https://tecnoblog.net/feed/",
+    fonte: "Tecnoblog",
+  },
+  {
+    rssUrl: "https://olhardigital.com.br/editorias/noticias/feed/",
+    fonte: "Olhar Digital",
+  },
+];
+
+const FEEDS_POR_KIND: Record<RondaRssKind, RondaRssFeedConfig[]> = {
+  gov: RONDA_RSS_FEEDS_GOV,
+  tech: RONDA_RSS_FEEDS_TECH,
+};
 
 const ITENS_POR_FONTE = 10;
 
@@ -222,10 +268,13 @@ export type RondaRssAgregadoOk = {
   total: number;
 };
 
-export async function agregarRondaRss(): Promise<RondaRssAgregadoOk> {
+export async function agregarRondaRss(
+  kind: RondaRssKind = "gov"
+): Promise<RondaRssAgregadoOk> {
+  const feeds = FEEDS_POR_KIND[kind];
   const nextPuxada = criarSequenciaPuxada();
   const porFonte = await Promise.all(
-    RONDA_RSS_FEEDS.map((config) => coletarItensUmaFonte(config, nextPuxada))
+    feeds.map((config) => coletarItensUmaFonte(config, nextPuxada))
   );
   const todasNoticias = porFonte.flat();
 

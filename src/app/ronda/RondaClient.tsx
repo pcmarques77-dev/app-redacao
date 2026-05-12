@@ -40,11 +40,42 @@ function formatPublicadoNoSite(iso: string | null): string {
   });
 }
 
+function buildApiFetchUrl(apiPath: string, forceRefresh: boolean): string {
+  const base = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+  if (!forceRefresh) return base;
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}refresh=1`;
+}
+
+function erroParaMensagem(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof Event !== "undefined" && e instanceof Event) {
+    const t = e.type || "evento";
+    return `Falha na operação (${t}). Tente de novo.`;
+  }
+  const s = String(e);
+  if (s === "[object Event]") {
+    return "Falha de rede ou do navegador. Tente de novo.";
+  }
+  return s;
+}
+
+type RondaRoundTab = {
+  id: string;
+  label: string;
+  /** Se definido, a aba mostra um iframe em vez de buscar `apiPath`. */
+  embedUrl?: string;
+  /** JSON no formato de `/api/ronda` / `/api/ronda-rss`. Ignorado quando há `embedUrl`. */
+  apiPath?: string;
+};
+
 type RondaClientProps = {
   /** Título principal do cabeçalho (ex.: /ronda-rss ou /radar-pautas). */
   pageTitle?: string;
-  /** Endpoint JSON com o mesmo formato de `/api/ronda`. */
+  /** Endpoint JSON com o mesmo formato de `/api/ronda`. Ignorado quando há `roundTabs`. */
   apiPath?: string;
+  /** Abas (ex.: Ronda Gov / Ronda Tech); cada uma com seu `apiPath`. */
+  roundTabs?: RondaRoundTab[];
   /** Busca a lista ao abrir ou recarregar a página. */
   autoLoadOnMount?: boolean;
   /** Texto do botão de atualização manual. */
@@ -62,6 +93,7 @@ type RondaClientProps = {
 export function RondaClient({
   pageTitle = "Ronda Semiautomática",
   apiPath = "/api/ronda",
+  roundTabs,
   autoLoadOnMount = false,
   atualizarLabel = "Atualizar Ronda",
   tituloEhLink = false,
@@ -69,6 +101,23 @@ export function RondaClient({
   showMainNavRow = false,
   mainNavSecondIsAdmin = false,
 }: RondaClientProps) {
+  const tabMode = roundTabs != null && roundTabs.length > 0;
+  const [activeRoundId, setActiveRoundId] = useState(
+    () => roundTabs?.[0]?.id ?? ""
+  );
+
+  const activeRoundTab =
+    tabMode && roundTabs.length > 0
+      ? roundTabs.find((t) => t.id === activeRoundId) ?? roundTabs[0]
+      : null;
+
+  const embedUrl = activeRoundTab?.embedUrl?.trim() || undefined;
+
+  const effectiveApiPath = tabMode
+    ? embedUrl
+      ? null
+      : activeRoundTab?.apiPath ?? roundTabs[0]!.apiPath
+    : apiPath;
   const [noticias, setNoticias] = useState<NoticiaRonda[]>([]);
   const [jaBuscou, setJaBuscou] = useState(false);
   const [carregandoLista, setCarregandoLista] = useState(autoLoadOnMount);
@@ -77,11 +126,18 @@ export function RondaClient({
   const [showEscalaNavLink, setShowEscalaNavLink] = useState(false);
 
   const atualizarRonda = useCallback(async (forceRefresh?: boolean) => {
+    if (!effectiveApiPath) {
+      setErro(null);
+      setCarregandoLista(false);
+      setJaBuscou(true);
+      setNoticias([]);
+      return;
+    }
     setErro(null);
     setCarregandoLista(true);
     try {
-      const q = forceRefresh ? "?refresh=1" : "";
-      const res = await fetch(`${apiPath}${q}`);
+      const fetchUrl = buildApiFetchUrl(effectiveApiPath, !!forceRefresh);
+      const res = await fetch(fetchUrl);
       const raw = await res.text();
       let body: {
         ok?: boolean;
@@ -103,19 +159,28 @@ export function RondaClient({
       }
       setNoticias(body.noticias ?? []);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : String(e));
+      setErro(erroParaMensagem(e));
       setNoticias([]);
     } finally {
       setCarregandoLista(false);
       setJaBuscou(true);
     }
-  }, [apiPath]);
+  }, [effectiveApiPath]);
 
   useEffect(() => {
-    if (!autoLoadOnMount || autoLoadFeito.current) return;
+    if (!tabMode || !activeRoundId) return;
+    void atualizarRonda().catch((e) => {
+      console.error("[RondaClient] atualizarRonda (aba):", e);
+    });
+  }, [tabMode, activeRoundId, atualizarRonda]);
+
+  useEffect(() => {
+    if (tabMode || !autoLoadOnMount || autoLoadFeito.current) return;
     autoLoadFeito.current = true;
-    void atualizarRonda();
-  }, [autoLoadOnMount, atualizarRonda]);
+    void atualizarRonda().catch((e) => {
+      console.error("[RondaClient] atualizarRonda (autoLoad):", e);
+    });
+  }, [tabMode, autoLoadOnMount, atualizarRonda]);
 
   useEffect(() => {
     if (!showMainNavRow) {
@@ -123,26 +188,39 @@ export function RondaClient({
       return;
     }
     const supabase = createBrowserClient();
+    let cancelado = false;
     void (async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user?.id) {
-        setShowEscalaNavLink(false);
-        return;
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (cancelado) return;
+        if (!user?.id) {
+          setShowEscalaNavLink(false);
+          return;
+        }
+        const { data: row } = await supabase
+          .from("usuarios")
+          .select("funcao")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (cancelado) return;
+        setShowEscalaNavLink(
+          canManageEscala({
+            email: user.email,
+            funcao: row?.funcao ?? null,
+          })
+        );
+      } catch (e) {
+        if (!cancelado) {
+          console.error("[RondaClient] permissão escala:", e);
+          setShowEscalaNavLink(false);
+        }
       }
-      const { data: row } = await supabase
-        .from("usuarios")
-        .select("funcao")
-        .eq("id", user.id)
-        .maybeSingle();
-      setShowEscalaNavLink(
-        canManageEscala({
-          email: user.email,
-          funcao: row?.funcao ?? null,
-        })
-      );
     })();
+    return () => {
+      cancelado = true;
+    };
   }, [showMainNavRow]);
 
   return (
@@ -202,34 +280,97 @@ export function RondaClient({
           )}
         </header>
 
-        <div className="mb-8">
-          <button
-            type="button"
-            disabled={carregandoLista}
-            onClick={() => void atualizarRonda(true)}
-            className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+        {tabMode && roundTabs.length > 0 ? (
+          <div
+            className="mb-6 flex flex-wrap gap-2"
+            role="tablist"
+            aria-label="Escolher ronda"
           >
-            {carregandoLista ? "Carregando..." : atualizarLabel}
-          </button>
-        </div>
+            {roundTabs.map((t) => {
+              const active = t.id === activeRoundId;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveRoundId(t.id)}
+                  className={
+                    active
+                      ? "rounded-lg border-2 border-teal-600 bg-teal-50 px-4 py-2 text-sm font-semibold text-teal-900 shadow-sm"
+                      : "rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                  }
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
-        {erro && (
+        {!embedUrl ? (
+          <div className="mb-8">
+            <button
+              type="button"
+              disabled={carregandoLista}
+              onClick={() => {
+                void atualizarRonda(true).catch((e) => {
+                  console.error("[RondaClient] atualizarRonda (botão):", e);
+                });
+              }}
+              className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {carregandoLista ? "Carregando..." : atualizarLabel}
+            </button>
+          </div>
+        ) : (
+          <div className="mb-6 flex flex-wrap items-center gap-3">
+            <a
+              href={embedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              Abrir {activeRoundTab?.label ?? "embed"} em nova aba
+            </a>
+            <p className="text-xs text-slate-500">
+              Conteúdo carregado no site do Discover; o app só incorpora a
+              página.
+            </p>
+          </div>
+        )}
+
+        {erro && !embedUrl ? (
           <div
             className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
             role="alert"
           >
             {erro}
           </div>
-        )}
+        ) : null}
 
-        {jaBuscou && !carregandoLista && noticias.length === 0 && (
-          <p className="rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-12 text-center text-sm text-slate-500">
-            Nenhuma notícia retornada pelos feeds. Clique em{" "}
-            <strong>{atualizarLabel}</strong> para tentar de novo.
-          </p>
-        )}
+        {jaBuscou &&
+          !carregandoLista &&
+          !embedUrl &&
+          noticias.length === 0 && (
+            <p className="rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-12 text-center text-sm text-slate-500">
+              Nenhuma notícia retornada pelos feeds. Clique em{" "}
+              <strong>{atualizarLabel}</strong> para tentar de novo.
+            </p>
+          )}
 
-        {noticias.length > 0 && (
+        {embedUrl ? (
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <iframe
+              title={activeRoundTab?.label ?? "Conteúdo incorporado"}
+              src={embedUrl}
+              className="h-[min(85vh,920px)] w-full border-0 bg-white"
+              referrerPolicy="strict-origin-when-cross-origin"
+            />
+          </div>
+        ) : null}
+
+        {!embedUrl && noticias.length > 0 && (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {noticias.map((n, i) => (
               <article
@@ -286,3 +427,5 @@ export function RondaClient({
     </div>
   );
 }
+
+export type { RondaRoundTab };
