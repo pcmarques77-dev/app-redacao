@@ -10,7 +10,7 @@ import {
   type FormEvent,
 } from "react";
 import { deleteEscala, saveEscalaAction } from "@/app/actions/escalas";
-import { createBrowserClient } from "@/lib/supabase/client";
+import { listReportersForSessionAction } from "@/app/actions/pautas";
 
 export const ESCALA_TIPO_FERIADO = "Feriado";
 export const ESCALA_TIPO_PLANTAO = "Plantão";
@@ -288,20 +288,16 @@ export function EscalaForm({
     }
     setLoadingUsers(true);
     setUsersError(null);
-    const supabase = createBrowserClient();
     void (async () => {
-      const { data, error: qErr } = await supabase
-        .from("usuarios")
-        .select("id, nome")
-        .order("nome", { ascending: true });
+      const res = await listReportersForSessionAction();
       if (cancelled) return;
       setLoadingUsers(false);
-      if (qErr) {
-        setUsersError(qErr.message || "Não foi possível carregar os jornalistas.");
+      if (!res.ok) {
+        setUsersError(res.error);
         setUsuarios([]);
         return;
       }
-      setUsuarios((data as EscalaUsuarioOption[]) ?? []);
+      setUsuarios((res.rows as EscalaUsuarioOption[]) ?? []);
     })();
     return () => {
       cancelled = true;

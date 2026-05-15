@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { getAdminActor } from "@/app/actions/admin";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { notifyEditorsDemandaMultimidia } from "@/lib/demanda-multimidia-email";
 import {
   PAUTA_ACCESS_DENIED,
@@ -78,6 +79,45 @@ export async function getPautaSessionAction(): Promise<
     isSuperAdmin: actor.isSuperAdmin,
     isEditor: actor.isEditor,
   };
+}
+
+/**
+ * Repórteres para dropdowns. Exige sessão; lê `usuarios` com service role (como o resto
+ * do servidor), para não depender de RLS no PostgREST — caso contrário o SELECT podia
+ * devolver 0 linhas sem erro.
+ */
+export type ReporterOptionRow = { id: string; nome: string | null };
+
+export async function listReportersForSessionAction(): Promise<
+  | { ok: true; rows: ReporterOptionRow[] }
+  | { ok: false; error: string }
+> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) {
+    return { ok: false, error: "Sessão inválida. Faça login novamente." };
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data, error } = await admin
+    .from("usuarios")
+    .select("id, nome")
+    .order("nome", { ascending: true });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+  return { ok: true, rows: (data ?? []) as ReporterOptionRow[] };
 }
 
 export async function listPautasDashboardAction(): Promise<

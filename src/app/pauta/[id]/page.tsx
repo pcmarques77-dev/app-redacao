@@ -12,11 +12,15 @@ import {
   type DragEvent,
   type FormEvent,
 } from "react";
-import { createBrowserClient } from "@/lib/supabase/client";
+import {
+  createBrowserClient,
+  ensureSupabaseAuthReady,
+} from "@/lib/supabase/client";
 import { canUserEditOrDeletePauta } from "@/lib/admin-acl";
 import {
   deletePautasAction,
   getPautaSessionAction,
+  listReportersForSessionAction,
   updatePautaAction,
 } from "@/app/actions/pautas";
 import {
@@ -300,9 +304,10 @@ export default function EditarPauta() {
       }
 
       const supabase = createBrowserClient();
+      await ensureSupabaseAuthReady(supabase);
 
-      const [repRes, pautaRes] = await Promise.all([
-        supabase.from("usuarios").select("id, nome").order("nome", { ascending: true }),
+      const [repResult, pautaRes] = await Promise.all([
+        listReportersForSessionAction(),
         supabase
           .from("pautas")
           .select(
@@ -314,10 +319,8 @@ export default function EditarPauta() {
 
       if (cancelled) return;
 
-      if (repRes.error) {
-        setErroCarregamento(
-          repRes.error.message || "Não foi possível carregar os repórteres."
-        );
+      if (!repResult.ok) {
+        setErroCarregamento(repResult.error);
         setLoading(false);
         return;
       }
@@ -345,7 +348,7 @@ export default function EditarPauta() {
         demanda_multimidia: boolean | null;
       };
 
-      setReporters((repRes.data as ReporterOption[]) ?? []);
+      setReporters((repResult.rows as ReporterOption[]) ?? []);
       setTituloProvisorio(row.titulo_provisorio?.trim() ?? "");
       setFontes(row.fontes?.trim() ?? "");
       setArquivosUrls(normalizeArquivosUrls(row.arquivos_urls));

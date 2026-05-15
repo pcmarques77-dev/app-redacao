@@ -14,17 +14,18 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { createBrowserClient } from "@/lib/supabase/client";
 import {
   canUserEditOrDeletePauta,
   isEditorRole,
   isSuperAdminEmail,
 } from "@/lib/admin-acl";
+import { listEscalasForDashboardAction } from "@/app/actions/escalas";
 import {
   createPautaAction,
   deletePautasAction,
   getPautaSessionAction,
   listPautasDashboardAction,
+  listReportersForSessionAction,
   updatePautaAction,
 } from "@/app/actions/pautas";
 import {
@@ -1186,34 +1187,10 @@ export function PautasDashboard() {
       }
     | { ok: false; error: string }
   > => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url?.trim() || !key?.trim()) {
-      return {
-        ok: false,
-        error:
-          "Configure NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY no arquivo .env.local.",
-      };
-    }
-    const supabase = createBrowserClient();
-    const [pautaResult, eRes, usuariosRes] = await Promise.all([
+    const [pautaResult, escalaResult, repResult] = await Promise.all([
       listPautasDashboardAction(),
-      supabase
-        .from("escalas")
-        .select(
-          `
-        id,
-        tipo,
-        usuario_id,
-        data_inicio,
-        data_fim,
-        coordenador,
-        horario,
-        usuarios ( nome )
-      `
-        )
-        .order("data_inicio", { ascending: true }),
-      supabase.from("usuarios").select("id, nome").order("nome", { ascending: true }),
+      listEscalasForDashboardAction(),
+      listReportersForSessionAction(),
     ]);
 
     if (!pautaResult.ok) {
@@ -1222,12 +1199,12 @@ export function PautasDashboard() {
         error: pautaResult.error || "Não foi possível carregar as pautas.",
       };
     }
-    const escalas: EscalaRow[] = eRes.error
-      ? []
-      : ((eRes.data ?? []) as unknown as EscalaRow[]);
-    const usuarios: ModalReporterOption[] = usuariosRes.error
-      ? []
-      : ((usuariosRes.data ?? []) as ModalReporterOption[]);
+    const escalas: EscalaRow[] = escalaResult.ok
+      ? ((escalaResult.rows ?? []) as unknown as EscalaRow[])
+      : [];
+    const usuarios: ModalReporterOption[] = repResult.ok
+      ? ((repResult.rows ?? []) as ModalReporterOption[])
+      : [];
     return {
       ok: true,
       pautas: pautaResult.rows as PautaRow[],
@@ -1316,20 +1293,18 @@ export function PautasDashboard() {
     }
     setModalReportersLoading(true);
     setModalReportersError(null);
-    const supabase = createBrowserClient();
     void (async () => {
-      const { data, error: qErr } = await supabase
-        .from("usuarios")
-        .select("id, nome")
-        .order("nome", { ascending: true });
+      const repResult = await listReportersForSessionAction();
       if (cancelled) return;
       setModalReportersLoading(false);
-      if (qErr) {
-        setModalReportersError(qErr.message || "Não foi possível carregar os repórteres.");
+      if (!repResult.ok) {
+        setModalReportersError(
+          repResult.error || "Não foi possível carregar os repórteres."
+        );
         setModalReporters([]);
         return;
       }
-      setModalReporters((data as ModalReporterOption[]) ?? []);
+      setModalReporters((repResult.rows as ModalReporterOption[]) ?? []);
     })();
     return () => {
       cancelled = true;

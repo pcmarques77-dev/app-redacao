@@ -17,6 +17,7 @@ import { isEditorRole, isSuperAdminEmail } from "@/lib/admin-acl";
 import {
   createPautaAction,
   getPautaSessionAction,
+  listReportersForSessionAction,
 } from "@/app/actions/pautas";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
 import type { PautaStatus } from "@/lib/pautas-shared";
@@ -282,20 +283,15 @@ export default function NovaPautaPage() {
       return;
     }
 
-    const supabase = createBrowserClient();
     void (async () => {
-      const { data, error } = await supabase
-        .from("usuarios")
-        .select("id, nome")
-        .order("nome", { ascending: true });
-
+      const res = await listReportersForSessionAction();
       if (cancelled) return;
       setLoadingReporters(false);
-      if (error) {
-        setErroReporters(error.message || "Não foi possível carregar os repórteres.");
+      if (!res.ok) {
+        setErroReporters(res.error);
         return;
       }
-      setReporters((data as ReporterOption[]) ?? []);
+      setReporters((res.rows as ReporterOption[]) ?? []);
     })();
 
     return () => {
