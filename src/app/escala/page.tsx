@@ -63,12 +63,17 @@ export default function EscalaPage() {
   return (
     <div className="mx-auto max-w-lg px-4 py-10 sm:px-6 lg:px-8">
       <header className="mb-8 border-b border-slate-200 pb-6">
-        <Link
-          href="/"
-          className="text-sm font-medium text-blue-600 hover:text-blue-800"
-        >
-          ← Voltar às pautas
-        </Link>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-medium">
+          <Link href="/" className="text-blue-600 hover:text-blue-800">
+            ← Voltar às pautas
+          </Link>
+          <Link
+            href="/escala/plantoes"
+            className="text-blue-600 hover:text-blue-800"
+          >
+            Plantões (fins de semana)
+          </Link>
+        </div>
         <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-900">
           Escala
         </h1>

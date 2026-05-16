@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { canManageEscala } from "@/lib/admin-acl";
+import { PautasAppHeader } from "@/components/PautasAppHeader";
 import { createBrowserClient } from "@/lib/supabase/client";
 import { FonteLogo } from "./FonteLogo";
 
@@ -84,10 +85,12 @@ type RondaClientProps = {
   tituloEhLink?: boolean;
   /** Parágrafo explicativo sob o título (ex.: /ronda-rss sem texto). */
   showHeaderDescription?: boolean;
-  /** Barra Calendário / Radar de Pautas / Escala / Nova Pauta (como no Admin). */
+  /** Barra Calendário / Radar de Pautas / Plantões / Nova Pauta (como no Admin). */
   showMainNavRow?: boolean;
   /** Com `showMainNavRow`, troca o 2.º link para Admin em vez de Radar de Pautas. */
   mainNavSecondIsAdmin?: boolean;
+  /** Cabeçalho global do app (logo, cadastro, Admin, Radar, Plantões, Nova Pauta). */
+  showPautasAppHeader?: boolean;
 };
 
 export function RondaClient({
@@ -100,6 +103,7 @@ export function RondaClient({
   showHeaderDescription = true,
   showMainNavRow = false,
   mainNavSecondIsAdmin = false,
+  showPautasAppHeader = false,
 }: RondaClientProps) {
   const tabMode = roundTabs != null && roundTabs.length > 0;
   const [activeRoundId, setActiveRoundId] = useState(
@@ -183,7 +187,7 @@ export function RondaClient({
   }, [tabMode, autoLoadOnMount, atualizarRonda]);
 
   useEffect(() => {
-    if (!showMainNavRow) {
+    if (!showMainNavRow || showPautasAppHeader) {
       setShowEscalaNavLink(false);
       return;
     }
@@ -221,68 +225,72 @@ export function RondaClient({
     return () => {
       cancelado = true;
     };
-  }, [showMainNavRow]);
+  }, [showMainNavRow, showPautasAppHeader]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/90">
       <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
-        <header className="mb-8 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-medium text-teal-700">Editorial</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-              {pageTitle}
-            </h1>
-            {showHeaderDescription ? (
-              <p className="mt-2 max-w-2xl text-sm text-slate-600">
-                Exibindo as 10 notícias mais recentes de cada fonte oficial,
-                ordenadas pela data de publicação no site (quando disponível).
-                Itens sem data na listagem vão ao fim, pela ordem da captura.
-                Pente-fino manual, sem IA.
-              </p>
-            ) : null}
-          </div>
-          {showMainNavRow ? (
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+        {showPautasAppHeader ? (
+          <PautasAppHeader />
+        ) : (
+          <header className="mb-8 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-teal-700">Editorial</p>
+              <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+                {pageTitle}
+              </h1>
+              {showHeaderDescription ? (
+                <p className="mt-2 max-w-2xl text-sm text-slate-600">
+                  Exibindo as 10 notícias mais recentes de cada fonte oficial,
+                  ordenadas pela data de publicação no site (quando disponível).
+                  Itens sem data na listagem vão ao fim, pela ordem da captura.
+                  Pente-fino manual, sem IA.
+                </p>
+              ) : null}
+            </div>
+            {showMainNavRow ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+                <Link
+                  href="/"
+                  className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+                >
+                  Calendário
+                </Link>
+                <Link
+                  href={mainNavSecondIsAdmin ? "/admin" : "/ronda-rss"}
+                  className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+                >
+                  {mainNavSecondIsAdmin ? "Admin" : "Radar de Pautas"}
+                </Link>
+                {showEscalaNavLink ? (
+                  <Link
+                    href="/escala/plantoes"
+                    className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
+                  >
+                  Plantões
+                  </Link>
+                ) : null}
+                <Link
+                  href="/nova-pauta"
+                  className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                >
+                  Nova Pauta
+                </Link>
+              </div>
+            ) : (
               <Link
                 href="/"
-                className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+                className="inline-flex shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
               >
-                Calendário
+                ← Painel de pautas
               </Link>
-              <Link
-                href={mainNavSecondIsAdmin ? "/admin" : "/ronda-rss"}
-                className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-              >
-                {mainNavSecondIsAdmin ? "Admin" : "Radar de Pautas"}
-              </Link>
-              {showEscalaNavLink ? (
-                <Link
-                  href="/escala"
-                  className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-                >
-                  Escala
-                </Link>
-              ) : null}
-              <Link
-                href="/nova-pauta"
-                className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-              >
-                Nova Pauta
-              </Link>
-            </div>
-          ) : (
-            <Link
-              href="/"
-              className="inline-flex shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              ← Painel de pautas
-            </Link>
-          )}
-        </header>
+            )}
+          </header>
+        )}
 
         {tabMode && roundTabs.length > 0 ? (
           <div
-            className="mb-6 flex flex-wrap gap-2"
+            className={`mb-6 flex flex-wrap gap-2${showPautasAppHeader ? " mt-6" : ""}`}
             role="tablist"
             aria-label="Escolher ronda"
           >
@@ -324,7 +332,7 @@ export function RondaClient({
             </button>
           </div>
         ) : (
-          <div className="mb-6 flex flex-wrap items-center gap-3">
+          <div className="mb-6">
             <a
               href={embedUrl}
               target="_blank"
@@ -333,10 +341,6 @@ export function RondaClient({
             >
               Abrir {activeRoundTab?.label ?? "embed"} em nova aba
             </a>
-            <p className="text-xs text-slate-500">
-              Conteúdo carregado no site do Discover; o app só incorpora a
-              página.
-            </p>
           </div>
         )}
 

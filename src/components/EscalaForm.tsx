@@ -12,12 +12,20 @@ import {
 import { deleteEscala, saveEscalaAction } from "@/app/actions/escalas";
 import { listReportersForSessionAction } from "@/app/actions/pautas";
 
-export const ESCALA_TIPO_FERIADO = "Feriado";
-export const ESCALA_TIPO_PLANTAO = "Plantão";
-export const ESCALA_TIPO_FERIAS = "Férias";
+import {
+  ESCALA_TIPO_FERIADO,
+  ESCALA_TIPO_FERIAS,
+  ESCALA_TIPO_PLANTAO,
+} from "@/lib/escala-constants";
 
 /** @deprecated Use `ESCALA_TIPO_FERIADO`. Mantido para leitura de registros antigos no banco. */
 export const ESCALA_TIPO_COORDENACAO = "Coordenação";
+
+export {
+  ESCALA_TIPO_FERIADO,
+  ESCALA_TIPO_FERIAS,
+  ESCALA_TIPO_PLANTAO,
+};
 
 const NOME_FERIADO_MAX = 30;
 

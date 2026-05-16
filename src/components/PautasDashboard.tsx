@@ -44,7 +44,8 @@ import {
   EscalaForm,
   type EscalaInitialValues,
 } from "@/components/EscalaForm";
-import logoVivaTaglineAzul from "@/assets/logo-viva-tagline-azul.svg";
+import { PlannerMonthPicker } from "@/components/PlannerMonthPicker";
+import { PautasAppHeader } from "@/components/PautasAppHeader";
 
 type ModalReporterOption = {
   id: string;
@@ -266,6 +267,33 @@ function dateToYmd(d: Date): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+/** Meses em 3 letras para rótulos do calendário (dias fora do mês do título). */
+const CAL_MONTH_ABBR_PT = [
+  "jan",
+  "fev",
+  "mar",
+  "abr",
+  "mai",
+  "jun",
+  "jul",
+  "ago",
+  "set",
+  "out",
+  "nov",
+  "dez",
+] as const;
+
+/** Formato `DD/mês` (ex.: 27/abr) a partir de `YYYY-MM-DD`. */
+function calendarOutsideMonthDayLabel(ymd: string): string {
+  const parts = ymd.split("-");
+  if (parts.length !== 3) return "";
+  const m = Number(parts[1]);
+  const d = Number(parts[2]);
+  if (!Number.isFinite(m) || m < 1 || m > 12 || !Number.isFinite(d)) return "";
+  const abbr = CAL_MONTH_ABBR_PT[m - 1];
+  return `${String(d).padStart(2, "0")}/${abbr}`;
+}
+
 /** Sobrevive a remontagem do painel após Server Actions / `router.refresh()`. */
 const DASHBOARD_CAL_STORAGE_KEY = "pautas-dashboard-cal-v1";
 
@@ -370,6 +398,7 @@ function PautasCalendar({
   weekStart,
   onPrevMonth,
   onNextMonth,
+  onCommitMonth,
   onPrevWeek,
   onNextWeek,
   pautasPorDia,
@@ -387,6 +416,7 @@ function PautasCalendar({
   weekStart: Date;
   onPrevMonth: () => void;
   onNextMonth: () => void;
+  onCommitMonth: (year: number, monthIndex: number) => void;
   onPrevWeek: () => void;
   onNextWeek: () => void;
   pautasPorDia: Map<string, PautaRow[]>;
@@ -406,22 +436,39 @@ function PautasCalendar({
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const weekLabels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
-  const cells: { day: number | null; key: string | null }[] = [];
+  /** Semana começa na segunda: inclui dias do mês anterior e, à direita, do seguinte. */
+  const cells: { day: number; key: string; outsideMonth: boolean }[] = [];
   for (let i = 0; i < startPad; i++) {
-    cells.push({ day: null, key: null });
+    const cellDate = addDaysLocal(first, -(startPad - i));
+    cells.push({
+      day: cellDate.getDate(),
+      key: dateToYmd(cellDate),
+      outsideMonth: true,
+    });
   }
   for (let d = 1; d <= daysInMonth; d++) {
     const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    cells.push({ day: d, key });
+    cells.push({ day: d, key, outsideMonth: false });
   }
-  while (cells.length % 7 !== 0) {
-    cells.push({ day: null, key: null });
+  const lastDayOfMonth = new Date(year, month, daysInMonth);
+  let tail = (7 - (cells.length % 7)) % 7;
+  for (let j = 1; j <= tail; j++) {
+    const cellDate = addDaysLocal(lastDayOfMonth, j);
+    cells.push({
+      day: cellDate.getDate(),
+      key: dateToYmd(cellDate),
+      outsideMonth: true,
+    });
   }
 
-  const tituloMes = monthAnchor.toLocaleDateString("pt-BR", {
-    month: "long",
-    year: "numeric",
-  });
+  const plannerCalendarYearBounds = useMemo(() => {
+    const y = monthAnchor.getFullYear();
+    const yNow = new Date().getFullYear();
+    return {
+      min: Math.min(y, yNow) - 3,
+      max: Math.max(y, yNow) + 3,
+    };
+  }, [monthAnchor]);
 
   const [dropHighlightKey, setDropHighlightKey] = useState<string | null>(null);
   const [statusContextMenu, setStatusContextMenu] = useState<{
@@ -750,9 +797,19 @@ function PautasCalendar({
         >
           {scope === "month" ? "← Mês anterior" : "← Semana anterior"}
         </button>
-        <h2 className="text-center text-lg font-semibold capitalize text-slate-900">
-          {scope === "month" ? tituloMes : formatWeekRangeTitle(weekStart)}
-        </h2>
+        {scope === "month" ? (
+          <PlannerMonthPicker
+            year={year}
+            monthIndex={month}
+            yearMin={plannerCalendarYearBounds.min}
+            yearMax={plannerCalendarYearBounds.max}
+            onCommit={onCommitMonth}
+          />
+        ) : (
+          <h2 className="flex-1 text-center text-lg font-semibold capitalize text-slate-900">
+            {formatWeekRangeTitle(weekStart)}
+          </h2>
+        )}
         <button
           type="button"
           onClick={scope === "month" ? onNextMonth : onNextWeek}
@@ -777,26 +834,27 @@ function PautasCalendar({
           <div className="grid grid-cols-7 items-stretch gap-px bg-slate-200">
             {cells.map((cell, idx) => {
               const dayKey = cell.key;
+              const outside = cell.outsideMonth;
               return (
                 <div
                   key={idx}
                   className={`h-auto min-h-[150px] p-1 transition-colors sm:min-h-[160px] sm:p-1.5 ${
-                    cell.day === null
-                      ? "bg-slate-50/80"
+                    outside
+                      ? "bg-slate-50/95"
                       : dropHighlightKey === dayKey
                         ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400/70"
                         : "bg-white"
-                  }${dayKey && onDayClick ? " cursor-pointer" : ""}`}
+                  }${onDayClick ? " cursor-pointer" : ""}`}
                   {...dayCellHandlers(dayKey)}
                 >
-                  {cell.day !== null && dayKey !== null && (
-                    <>
-                      <div className="mb-1 text-right text-xs font-semibold tabular-nums text-slate-500">
-                        {cell.day}
-                      </div>
-                      {renderCalendarioDiaCards(dayKey)}
-                    </>
-                  )}
+                  <div
+                    className={`mb-1 text-right text-xs font-semibold tabular-nums ${
+                      outside ? "text-slate-400" : "text-slate-500"
+                    }`}
+                  >
+                    {outside ? calendarOutsideMonthDayLabel(dayKey) : cell.day}
+                  </div>
+                  {renderCalendarioDiaCards(dayKey)}
                 </div>
               );
             })}
@@ -1795,75 +1853,9 @@ export function PautasDashboard() {
     </div>
   );
 
-  const dashboardHeadline =
-    process.env.NEXT_PUBLIC_TITULO_DASHBOARD || "Painel de Pautas";
-  const logoVivaTaglineSrc =
-    typeof logoVivaTaglineAzul === "string"
-      ? logoVivaTaglineAzul
-      : logoVivaTaglineAzul.src;
-
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
-      <header className="mb-0 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="m-0">
-            <Link
-              href="/"
-              aria-label={dashboardHeadline}
-              className="inline-block max-w-full cursor-pointer rounded-sm text-left transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element -- SVG vetorial importado de assets */}
-              <img
-                src={logoVivaTaglineSrc}
-                alt=""
-                width={7418}
-                height={1175}
-                className="h-8 w-auto max-h-9 max-w-[min(100%,18rem)] object-contain object-left sm:h-10 sm:max-h-11 sm:max-w-[min(100%,22rem)] lg:max-w-[26rem]"
-              />
-            </Link>
-          </h1>
-          {sessionCtx ? (
-            <p className="mt-2 text-sm">
-              <Link
-                href={`/admin?editar=${encodeURIComponent(sessionCtx.userId)}`}
-                className="font-medium text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-              >
-                {(sessionCtx.nome ?? "").trim() ||
-                  sessionCtx.email ||
-                  "Meu cadastro"}
-              </Link>
-            </p>
-          ) : null}
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
-          <Link
-            href="/admin"
-            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-          >
-            Admin
-          </Link>
-          <Link
-            href="/ronda-rss"
-            className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-          >
-            Radar de Pautas
-          </Link>
-          {privilegedSession ? (
-            <Link
-              href="/escala"
-              className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-            >
-              Escala
-            </Link>
-          ) : null}
-          <Link
-            href="/nova-pauta"
-            className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-          >
-            Nova Pauta
-          </Link>
-        </div>
-      </header>
+      <PautasAppHeader />
 
       {loading && (
         <div
@@ -2175,6 +2167,7 @@ export function PautasDashboard() {
                   (d) => new Date(d.getFullYear(), d.getMonth() + 1, 1)
                 )
               }
+              onCommitMonth={(y, m) => setCalendarMonth(new Date(y, m, 1))}
               onPrevWeek={() =>
                 setCalendarWeekStart((d) => addDaysLocal(d, -7))
               }

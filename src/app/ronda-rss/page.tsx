@@ -44,8 +44,7 @@ export default function RondaRssPage() {
       atualizarLabel="Atualizar Radar de Pautas"
       tituloEhLink
       showHeaderDescription={false}
-      showMainNavRow
-      mainNavSecondIsAdmin
+      showPautasAppHeader
     />
   );
 }

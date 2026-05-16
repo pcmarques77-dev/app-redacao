@@ -17,10 +17,10 @@ import {
   type UsuarioTableRow,
 } from "@/app/actions/admin";
 import {
-  canManageEscala,
   isEditorRole,
   isSuperAdminEmail,
 } from "@/lib/admin-acl";
+import { PautasAppHeader } from "@/components/PautasAppHeader";
 import { createBrowserClient } from "@/lib/supabase/client";
 
 function isoToDatetimeLocalValue(iso: string | null): string {
@@ -299,46 +299,13 @@ function AdminUsuariosPageContent() {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-100/80">
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
-        <header className="mb-3 shrink-0 flex flex-col gap-3 border-b border-slate-200 pb-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
-              Admin
-            </h1>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
-            <Link
-              href="/"
-              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-            >
-              Calendário
-            </Link>
-            <Link
-              href="/ronda-rss"
-              className="inline-flex items-center justify-center rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-            >
-              Radar de Pautas
-            </Link>
-            {authHydrated &&
-              canManageEscala({
-                email: currentUserEmail,
-                funcao: currentUserRole,
-              }) && (
-                <Link
-                  href="/escala"
-                  className="inline-flex items-center justify-center rounded-md border border-slate-400 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-500"
-                >
-                  Escala
-                </Link>
-              )}
-            <Link
-              href="/nova-pauta"
-              className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-            >
-              Nova Pauta
-            </Link>
-          </div>
-        </header>
+      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col overflow-hidden px-4 py-10 sm:px-6 lg:px-8">
+        <PautasAppHeader />
+        <div className="mb-3 mt-6 shrink-0">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+            Admin
+          </h1>
+        </div>
 
         {banner && (
           <div
