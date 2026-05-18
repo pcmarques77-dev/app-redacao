@@ -26,7 +26,7 @@ export function decemberThroughFirstWeekendNextYearYmds(
   sundayAfterFirstSat.setDate(sundayAfterFirstSat.getDate() + 1);
 
   const out: string[] = [];
-  let cur = new Date(nextY, 0, 1);
+  const cur = new Date(nextY, 0, 1);
   while (cur <= sundayAfterFirstSat) {
     out.push(dateToYmdLocal(cur));
     cur.setDate(cur.getDate() + 1);

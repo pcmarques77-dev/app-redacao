@@ -451,7 +451,7 @@ function PautasCalendar({
     cells.push({ day: d, key, outsideMonth: false });
   }
   const lastDayOfMonth = new Date(year, month, daysInMonth);
-  let tail = (7 - (cells.length % 7)) % 7;
+  const tail = (7 - (cells.length % 7)) % 7;
   for (let j = 1; j <= tail; j++) {
     const cellDate = addDaysLocal(lastDayOfMonth, j);
     cells.push({
