@@ -118,30 +118,6 @@ export async function middleware(request: NextRequest) {
       Date.now() - sessionStartTs > SESSION_WALL_MS;
 
     if (sessionExpired) {
-      // #region agent log
-      fetch("http://127.0.0.1:7885/ingest/dfecccd3-2997-43f9-8f76-2d848a0185d0", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "cec986",
-        },
-        body: JSON.stringify({
-          sessionId: "cec986",
-          runId: "pre-fix",
-          hypothesisId: "B",
-          location: "middleware.ts:sessionExpired",
-          message: "session wall expired",
-          data: {
-            path,
-            isLogin,
-            protocol: request.nextUrl.protocol,
-            requestUrlProtocol: new URL(request.url).protocol,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
-
       if (isLogin) {
         const res = noStore(NextResponse.next({ request }));
         await signOutOnResponse(request, res, url, anon);
@@ -157,28 +133,6 @@ export async function middleware(request: NextRequest) {
     redirectUrl.searchParams.set("next", path);
     const r = noStore(NextResponse.redirect(redirectUrl));
     r.cookies.delete(SESSION_START_COOKIE);
-    // #region agent log
-    fetch("http://127.0.0.1:7885/ingest/dfecccd3-2997-43f9-8f76-2d848a0185d0", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "cec986",
-      },
-      body: JSON.stringify({
-        sessionId: "cec986",
-        runId: "pre-fix",
-        hypothesisId: "A",
-        location: "middleware.ts:protectedRedirect",
-        message: "unauthenticated protected redirect",
-        data: {
-          path,
-          location: r.headers.get("location"),
-          protocol: request.nextUrl.protocol,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return r;
   }
 
@@ -186,27 +140,6 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/";
     redirectUrl.searchParams.delete("next");
-    // #region agent log
-    fetch("http://127.0.0.1:7885/ingest/dfecccd3-2997-43f9-8f76-2d848a0185d0", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "cec986",
-      },
-      body: JSON.stringify({
-        sessionId: "cec986",
-        runId: "pre-fix",
-        hypothesisId: "B",
-        location: "middleware.ts:loginToHome",
-        message: "authenticated user on login redirecting home",
-        data: {
-          location: redirectUrl.toString(),
-          protocol: redirectUrl.protocol,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     return noStore(NextResponse.redirect(redirectUrl));
   }
 
@@ -227,30 +160,6 @@ export async function middleware(request: NextRequest) {
   if (isPublicAuth) {
     noStore(supabaseResponse);
   }
-
-  // #region agent log
-  fetch("http://127.0.0.1:7885/ingest/dfecccd3-2997-43f9-8f76-2d848a0185d0", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "cec986",
-    },
-    body: JSON.stringify({
-      sessionId: "cec986",
-      runId: "pre-fix",
-      hypothesisId: "C",
-      location: "middleware.ts:passThrough",
-      message: "middleware pass-through",
-      data: {
-        path,
-        hasUser: Boolean(user),
-        isPublicAuth,
-        cacheControl: supabaseResponse.headers.get("cache-control"),
-      },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
 
   return supabaseResponse;
 }
