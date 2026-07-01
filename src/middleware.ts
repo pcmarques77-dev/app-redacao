@@ -5,13 +5,28 @@ import {
   SESSION_WALL_MS,
 } from "@/lib/session-constants";
 
-async function signOutAndRedirectToLogin(
+function noStore(res: NextResponse) {
+  res.headers.set(
+    "Cache-Control",
+    "private, no-store, max-age=0, must-revalidate"
+  );
+  return res;
+}
+
+function loginUrl(request: NextRequest): URL {
+  const redirectUrl = request.nextUrl.clone();
+  redirectUrl.pathname = "/login";
+  redirectUrl.search = "";
+  return redirectUrl;
+}
+
+async function signOutOnResponse(
   request: NextRequest,
+  response: NextResponse,
   supabaseUrl: string,
   anonKey: string
 ) {
-  const redirectRes = NextResponse.redirect(new URL("/login", request.url));
-  redirectRes.cookies.delete(SESSION_START_COOKIE);
+  response.cookies.delete(SESSION_START_COOKIE);
 
   const supabase = createServerClient(supabaseUrl, anonKey, {
     cookies: {
@@ -20,13 +35,25 @@ async function signOutAndRedirectToLogin(
       },
       setAll(cookiesToSet) {
         cookiesToSet.forEach(({ name, value, options }) =>
-          redirectRes.cookies.set(name, value, options)
+          response.cookies.set(name, value, options)
         );
       },
     },
   });
 
   await supabase.auth.signOut();
+}
+
+async function signOutAndRedirectToLogin(
+  request: NextRequest,
+  supabaseUrl: string,
+  anonKey: string
+) {
+  const redirectRes = noStore(
+    NextResponse.redirect(loginUrl(request))
+  );
+
+  await signOutOnResponse(request, redirectRes, supabaseUrl, anonKey);
   return redirectRes;
 }
 
@@ -81,12 +108,45 @@ export async function middleware(request: NextRequest) {
     path.startsWith("/api/ronda");
 
   let sessionStartTs: number | null = null;
+  let sessionExpired = false;
   if (user) {
     const startRaw = request.cookies.get(SESSION_START_COOKIE)?.value;
     sessionStartTs =
       startRaw && /^\d{10,}$/.test(startRaw) ? Number(startRaw) : null;
+    sessionExpired =
+      sessionStartTs != null &&
+      Date.now() - sessionStartTs > SESSION_WALL_MS;
 
-    if (sessionStartTs != null && Date.now() - sessionStartTs > SESSION_WALL_MS) {
+    if (sessionExpired) {
+      // #region agent log
+      fetch("http://127.0.0.1:7885/ingest/dfecccd3-2997-43f9-8f76-2d848a0185d0", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "cec986",
+        },
+        body: JSON.stringify({
+          sessionId: "cec986",
+          runId: "pre-fix",
+          hypothesisId: "B",
+          location: "middleware.ts:sessionExpired",
+          message: "session wall expired",
+          data: {
+            path,
+            isLogin,
+            protocol: request.nextUrl.protocol,
+            requestUrlProtocol: new URL(request.url).protocol,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
+      if (isLogin) {
+        const res = noStore(NextResponse.next({ request }));
+        await signOutOnResponse(request, res, url, anon);
+        return res;
+      }
       return signOutAndRedirectToLogin(request, url, anon);
     }
   }
@@ -95,8 +155,30 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("next", path);
-    const r = NextResponse.redirect(redirectUrl);
+    const r = noStore(NextResponse.redirect(redirectUrl));
     r.cookies.delete(SESSION_START_COOKIE);
+    // #region agent log
+    fetch("http://127.0.0.1:7885/ingest/dfecccd3-2997-43f9-8f76-2d848a0185d0", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "cec986",
+      },
+      body: JSON.stringify({
+        sessionId: "cec986",
+        runId: "pre-fix",
+        hypothesisId: "A",
+        location: "middleware.ts:protectedRedirect",
+        message: "unauthenticated protected redirect",
+        data: {
+          path,
+          location: r.headers.get("location"),
+          protocol: request.nextUrl.protocol,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     return r;
   }
 
@@ -104,7 +186,28 @@ export async function middleware(request: NextRequest) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/";
     redirectUrl.searchParams.delete("next");
-    return NextResponse.redirect(redirectUrl);
+    // #region agent log
+    fetch("http://127.0.0.1:7885/ingest/dfecccd3-2997-43f9-8f76-2d848a0185d0", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "cec986",
+      },
+      body: JSON.stringify({
+        sessionId: "cec986",
+        runId: "pre-fix",
+        hypothesisId: "B",
+        location: "middleware.ts:loginToHome",
+        message: "authenticated user on login redirecting home",
+        data: {
+          location: redirectUrl.toString(),
+          protocol: redirectUrl.protocol,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+    return noStore(NextResponse.redirect(redirectUrl));
   }
 
   if (!user && request.cookies.has(SESSION_START_COOKIE)) {
@@ -120,6 +223,34 @@ export async function middleware(request: NextRequest) {
       maxAge: Math.floor(SESSION_WALL_MS / 1000),
     });
   }
+
+  if (isPublicAuth) {
+    noStore(supabaseResponse);
+  }
+
+  // #region agent log
+  fetch("http://127.0.0.1:7885/ingest/dfecccd3-2997-43f9-8f76-2d848a0185d0", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "cec986",
+    },
+    body: JSON.stringify({
+      sessionId: "cec986",
+      runId: "pre-fix",
+      hypothesisId: "C",
+      location: "middleware.ts:passThrough",
+      message: "middleware pass-through",
+      data: {
+        path,
+        hasUser: Boolean(user),
+        isPublicAuth,
+        cacheControl: supabaseResponse.headers.get("cache-control"),
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
 
   return supabaseResponse;
 }
