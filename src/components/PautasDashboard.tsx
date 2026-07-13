@@ -1209,7 +1209,7 @@ export function PautasDashboard() {
   }, [usuariosFiltro]);
 
   const opcoesEditorias = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(EDITORIA_OPTIONS);
     for (const p of pautas) {
       const e = p.editoria?.trim();
       if (e) set.add(e);
