@@ -12,7 +12,7 @@ import {
 
 function PlantoesPageShell({ children }: { children?: ReactNode }) {
   return (
-    <div className="mx-auto min-h-screen max-w-6xl bg-white px-4 py-10 sm:px-6 lg:px-8">
+    <div className="mx-auto min-h-screen max-w-page bg-white px-4 py-10 sm:px-6 lg:px-8">
       <PautasAppHeader />
       <div className="mt-6">{children}</div>
     </div>

@@ -299,7 +299,7 @@ function AdminUsuariosPageContent() {
 
   return (
     <div className="min-h-screen bg-slate-100/80">
-      <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-page px-4 py-10 sm:px-6 lg:px-8">
         <PautasAppHeader />
         <div className="mb-3 mt-6">
           <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">

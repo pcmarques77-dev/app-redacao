@@ -101,7 +101,7 @@ export default function AdminNovoUsuarioPage() {
 
   return (
     <div className="min-h-screen bg-slate-100/80">
-      <div className="mx-auto max-w-lg px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-page px-4 py-8 sm:px-6 lg:px-8">
         <header className="mb-8 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">

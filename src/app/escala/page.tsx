@@ -48,7 +48,7 @@ export default function EscalaPage() {
 
   if (checking) {
     return (
-      <div className="mx-auto max-w-lg px-4 py-10 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-page px-4 py-10 sm:px-6 lg:px-8">
         <p className="text-sm text-slate-600" role="status">
           Verificando permissão…
         </p>
@@ -61,7 +61,7 @@ export default function EscalaPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg px-4 py-10 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-page px-4 py-10 sm:px-6 lg:px-8">
       <header className="mb-8 border-b border-slate-200 pb-6">
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-medium">
           <Link href="/" className="text-blue-600 hover:text-blue-800">
