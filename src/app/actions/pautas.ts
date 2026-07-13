@@ -12,6 +12,7 @@ import {
   type PautaDashboardRow,
   type UpdatePautaPatch,
 } from "@/lib/pautas-shared";
+import { filterUsuariosForSelects } from "@/lib/usuarios-select";
 
 const UPDATE_KEYS = new Set([
   "titulo_provisorio",
@@ -117,7 +118,10 @@ export async function listReportersForSessionAction(): Promise<
   if (error) {
     return { ok: false, error: error.message };
   }
-  return { ok: true, rows: (data ?? []) as ReporterOptionRow[] };
+  return {
+    ok: true,
+    rows: filterUsuariosForSelects((data ?? []) as ReporterOptionRow[]),
+  };
 }
 
 export async function listPautasDashboardAction(): Promise<

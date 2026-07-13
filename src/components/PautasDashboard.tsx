@@ -15,11 +15,13 @@ import {
   type ReactNode,
 } from "react";
 import {
+  canManageStreamyardEntry,
   canUserEditOrDeletePauta,
   isEditorRole,
   isSuperAdminEmail,
 } from "@/lib/admin-acl";
-import { listEscalasForDashboardAction } from "@/app/actions/escalas";
+import { isStreamyardTipo } from "@/lib/escala-constants";
+import { listEscalasForDashboardAction, moveStreamyardToDateAction } from "@/app/actions/escalas";
 import {
   createPautaAction,
   deletePautasAction,
@@ -44,6 +46,10 @@ import {
   EscalaForm,
   type EscalaInitialValues,
 } from "@/components/EscalaForm";
+import {
+  StreamyardForm,
+  type StreamyardInitialValues,
+} from "@/components/StreamyardForm";
 import { PlannerMonthPicker } from "@/components/PlannerMonthPicker";
 import { PautasAppHeader } from "@/components/PautasAppHeader";
 
@@ -404,12 +410,14 @@ function PautasCalendar({
   pautasPorDia,
   escalas,
   onDropDeadline,
+  onDropStreamyard,
   controlsContent,
   onDayClick,
   onEscalaCardClick,
   onPautaChipClick,
   onPautaStatusChange,
   canManageDeadlineForPauta,
+  canDragStreamyard,
 }: {
   scope: "month" | "week";
   monthAnchor: Date;
@@ -422,12 +430,17 @@ function PautasCalendar({
   pautasPorDia: Map<string, PautaRow[]>;
   escalas: EscalaRow[];
   onDropDeadline: (pautaId: string, targetDayYmd: string) => void | Promise<void>;
+  onDropStreamyard?: (
+    escalaId: string,
+    targetDayYmd: string
+  ) => void | Promise<void>;
   controlsContent?: ReactNode;
   onDayClick?: (dayYmd: string) => void;
   onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
   onPautaChipClick?: (p: PautaRow) => void;
   onPautaStatusChange?: (pautaId: string, status: PautaStatus) => void | Promise<void>;
   canManageDeadlineForPauta?: (p: PautaRow) => boolean;
+  canDragStreamyard?: (e: EscalaRow) => boolean;
 }) {
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
@@ -527,10 +540,16 @@ function PautasCalendar({
       e.preventDefault();
       setDropHighlightKey(null);
       const pautaId = e.dataTransfer.getData("pautaId");
-      if (!pautaId?.trim()) return;
-      void onDropDeadline(pautaId.trim(), dayKey);
+      if (pautaId?.trim()) {
+        void onDropDeadline(pautaId.trim(), dayKey);
+        return;
+      }
+      const streamyardId = e.dataTransfer.getData("streamyardEscalaId");
+      if (streamyardId?.trim()) {
+        void onDropStreamyard?.(streamyardId.trim(), dayKey);
+      }
     },
-    [onDropDeadline]
+    [onDropDeadline, onDropStreamyard]
   );
 
   const handleDragStartCard = useCallback((e: DragEvent<HTMLButtonElement>) => {
@@ -541,6 +560,17 @@ function PautasCalendar({
     }
   }, []);
 
+  const handleDragStartStreamyardCard = useCallback(
+    (e: DragEvent<HTMLButtonElement>) => {
+      const id = e.currentTarget.dataset.streamyardEscalaId;
+      if (id) {
+        e.dataTransfer.setData("streamyardEscalaId", id);
+        e.dataTransfer.effectAllowed = "move";
+      }
+    },
+    []
+  );
+
   const handleDragEndCard = useCallback(() => {
     setDropHighlightKey(null);
   }, []);
@@ -548,18 +578,20 @@ function PautasCalendar({
   type CalendarioDiaItem =
     | { tipo: "feriado"; escala: EscalaRow }
     | { tipo: "plantao"; escala: EscalaRow }
+    | { tipo: "streamyard"; escala: EscalaRow }
     | { tipo: "pauta"; pauta: PautaRow }
     | { tipo: "ferias"; escala: EscalaRow };
 
   const CAL_EVENT_ORDER: Record<CalendarioDiaItem["tipo"], number> = {
     feriado: 1,
     plantao: 2,
-    pauta: 3,
-    ferias: 4,
+    streamyard: 3,
+    pauta: 4,
+    ferias: 5,
   };
 
   const calendarioDiaItemMinutes = (item: CalendarioDiaItem): number | null => {
-    if (item.tipo === "plantao") {
+    if (item.tipo === "plantao" || item.tipo === "streamyard") {
       return plantaoHorarioStartMinutes(item.escala.horario);
     }
     if (item.tipo === "pauta") {
@@ -586,6 +618,12 @@ function PautasCalendar({
     for (const e of escalas) {
       if (isPlantaoTipo(e.tipo) && e.data_inicio?.trim() === dayKey) {
         items.push({ tipo: "plantao", escala: e });
+      }
+    }
+
+    for (const e of escalas) {
+      if (isStreamyardTipo(e.tipo) && e.data_inicio?.trim() === dayKey) {
+        items.push({ tipo: "streamyard", escala: e });
       }
     }
 
@@ -677,6 +715,36 @@ function PautasCalendar({
               >
                 <span className="line-clamp-2 font-semibold">
                   Plantão: {escalaUsuarioNome(e)}
+                </span>
+                {e.horario?.trim() && (
+                  <span className="mt-0.5 block truncate text-[9px] font-normal tabular-nums opacity-85">
+                    {e.horario.trim()}
+                  </span>
+                )}
+              </button>
+            );
+          }
+
+          if (item.tipo === "streamyard") {
+            const e = item.escala;
+            const canDrag = canDragStreamyard?.(e) ?? false;
+            return (
+              <button
+                key={key}
+                type="button"
+                data-streamyard-escala-id={e.id}
+                draggable={canDrag}
+                onDragStart={canDrag ? handleDragStartStreamyardCard : undefined}
+                onDragEnd={canDrag ? handleDragEndCard : undefined}
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onEscalaCardClick?.(e, dayKey);
+                }}
+                className={`block w-full rounded border border-[#9bb86a]/55 bg-[#c2e381] px-1.5 py-1 text-left text-[10px] font-medium leading-snug text-lime-950 shadow-sm transition hover:bg-[#b8d972] hover:ring-2 hover:ring-[#9bb86a]/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-[#8fad5c] ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+              >
+                <span className="block font-semibold">Streamyard</span>
+                <span className="line-clamp-2 block font-medium">
+                  {escalaUsuarioNome(e)}
                 </span>
                 {e.horario?.trim() && (
                   <span className="mt-0.5 block truncate text-[9px] font-normal tabular-nums opacity-85">
@@ -1085,16 +1153,18 @@ export function PautasDashboard() {
   const [modalReportersError, setModalReportersError] = useState<string | null>(null);
   const [modalReporterId, setModalReporterId] = useState("");
   const [modalEditoria, setModalEditoria] = useState("Últimas Notícias");
-  const [modalDemandaMultimidia, setModalDemandaMultimidia] = useState(false);
   const [pautaCalendarioSomenteLeitura, setPautaCalendarioSomenteLeitura] =
     useState<PautaRow | null>(null);
-  const [modalTab, setModalTab] = useState<"pauta" | "escala">("pauta");
+  const [modalTab, setModalTab] = useState<"pauta" | "streamyard" | "escala">(
+    "pauta"
+  );
   const [escalaFormDirty, setEscalaFormDirty] = useState(false);
   const [escalaSaving, setEscalaSaving] = useState(false);
   const [editingEscala, setEditingEscala] = useState<EscalaRow | null>(null);
 
   const escalaFormInitial = useMemo((): EscalaInitialValues | undefined => {
     if (!editingEscala?.usuario_id?.trim()) return undefined;
+    if (isStreamyardTipo(editingEscala.tipo)) return undefined;
     return {
       id: editingEscala.id,
       tipo: editingEscala.tipo,
@@ -1102,6 +1172,18 @@ export function PautasDashboard() {
       data_inicio: editingEscala.data_inicio,
       data_fim: editingEscala.data_fim,
       coordenador: editingEscala.coordenador,
+      horario: editingEscala.horario,
+    };
+  }, [editingEscala]);
+
+  const streamyardFormInitial = useMemo(():
+    | StreamyardInitialValues
+    | undefined => {
+    if (!editingEscala?.usuario_id?.trim()) return undefined;
+    if (!isStreamyardTipo(editingEscala.tipo)) return undefined;
+    return {
+      id: editingEscala.id,
+      usuario_id: editingEscala.usuario_id.trim(),
       horario: editingEscala.horario,
     };
   }, [editingEscala]);
@@ -1150,6 +1232,19 @@ export function PautasDashboard() {
         currentUserEmail: sessionCtx.email,
         currentUserRole: sessionCtx.funcao,
         pautaReporterId: p.reporter_id,
+      });
+    },
+    [sessionCtx]
+  );
+
+  const canDragStreamyard = useCallback(
+    (e: EscalaRow) => {
+      if (!sessionCtx || !isStreamyardTipo(e.tipo)) return false;
+      return canManageStreamyardEntry({
+        currentUserId: sessionCtx.userId,
+        currentUserEmail: sessionCtx.email,
+        currentUserRole: sessionCtx.funcao,
+        entryUsuarioId: e.usuario_id,
       });
     },
     [sessionCtx]
@@ -1565,6 +1660,35 @@ export function PautasDashboard() {
     [pautas]
   );
 
+  const handleCalendarStreamyardDrop = useCallback(
+    async (escalaId: string, targetYmd: string) => {
+      setFeedbackErro(null);
+      const row = escalas.find((e) => e.id === escalaId);
+      if (!row) return;
+      if (row.data_inicio?.trim() === targetYmd) return;
+
+      const previousDate = row.data_inicio;
+
+      setEscalas((rows) =>
+        rows.map((e) =>
+          e.id === escalaId ? { ...e, data_inicio: targetYmd } : e
+        )
+      );
+
+      const res = await moveStreamyardToDateAction(escalaId, targetYmd);
+
+      if (!res.ok) {
+        setEscalas((rows) =>
+          rows.map((e) =>
+            e.id === escalaId ? { ...e, data_inicio: previousDate } : e
+          )
+        );
+        setFeedbackErro(res.error);
+      }
+    },
+    [escalas]
+  );
+
   const closeNovaPautaModal = useCallback(() => {
     setIsModalOpen(false);
     setSelectedDate(null);
@@ -1572,7 +1696,6 @@ export function PautasDashboard() {
     setModalResumo("");
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
-    setModalDemandaMultimidia(false);
     setModalSaving(false);
     setModalError(null);
     setModalReportersError(null);
@@ -1587,8 +1710,7 @@ export function PautasDashboard() {
     const pautaDirty =
       modalTitulo.trim() !== "" ||
       modalResumo.trim() !== "" ||
-      modalReporterId.trim() !== "" ||
-      modalDemandaMultimidia;
+      modalReporterId.trim() !== "";
     if (pautaDirty || escalaFormDirty) {
       if (
         !window.confirm(
@@ -1605,7 +1727,6 @@ export function PautasDashboard() {
     modalTitulo,
     modalResumo,
     modalReporterId,
-    modalDemandaMultimidia,
     escalaFormDirty,
     closeNovaPautaModal,
   ]);
@@ -1639,7 +1760,6 @@ export function PautasDashboard() {
     setModalResumo("");
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
-    setModalDemandaMultimidia(false);
     setModalError(null);
     setModalReportersError(null);
     setModalTab("pauta");
@@ -1650,6 +1770,36 @@ export function PautasDashboard() {
 
   const handleEscalaCardClick = useCallback(
     (row: EscalaRow, dayYmd: string) => {
+      if (isStreamyardTipo(row.tipo)) {
+        if (!sessionCtx) return;
+        if (
+          !canManageStreamyardEntry({
+            currentUserId: sessionCtx.userId,
+            currentUserEmail: sessionCtx.email,
+            currentUserRole: sessionCtx.funcao,
+            entryUsuarioId: row.usuario_id,
+          })
+        ) {
+          setFeedbackErro(
+            "Você só pode editar suas próprias marcações Streamyard."
+          );
+          return;
+        }
+        setSelectedDate(dayYmd);
+        setEditingEscala(row);
+        setModalTitulo("");
+        setModalResumo("");
+        setModalReporterId("");
+        setModalEditoria("Últimas Notícias");
+        setModalError(null);
+        setModalReportersError(null);
+        setModalTab("streamyard");
+        setEscalaFormDirty(false);
+        setEscalaSaving(false);
+        setIsModalOpen(true);
+        return;
+      }
+
       if (!privilegedSession) {
         setFeedbackErro(
           "Acesso negado. Apenas editores podem gerenciar a escala."
@@ -1662,7 +1812,6 @@ export function PautasDashboard() {
       setModalResumo("");
       setModalReporterId("");
       setModalEditoria("Últimas Notícias");
-      setModalDemandaMultimidia(false);
       setModalError(null);
       setModalReportersError(null);
       setModalTab("escala");
@@ -1670,7 +1819,7 @@ export function PautasDashboard() {
       setEscalaSaving(false);
       setIsModalOpen(true);
     },
-    [privilegedSession]
+    [privilegedSession, sessionCtx]
   );
 
   const handleSubmitNovaPautaModal = useCallback(
@@ -1702,7 +1851,7 @@ export function PautasDashboard() {
         editoria: modalEditoria,
         status: "Sugerida",
         arquivos_urls: [],
-        demanda_multimidia: modalDemandaMultimidia,
+        demanda_multimidia: false,
       });
       setModalSaving(false);
       if (!insertRes.ok) {
@@ -1716,7 +1865,6 @@ export function PautasDashboard() {
       closeNovaPautaModal,
       refreshDashboardData,
       modalEditoria,
-      modalDemandaMultimidia,
       modalReporterId,
       modalResumo,
       modalTitulo,
@@ -2177,12 +2325,14 @@ export function PautasDashboard() {
               pautasPorDia={pautasPorDia}
               escalas={escalas}
               onDropDeadline={handleCalendarDeadlineDrop}
+              onDropStreamyard={handleCalendarStreamyardDrop}
               controlsContent={controlsLinha}
               onDayClick={handleCalendarDayClick}
               onEscalaCardClick={handleEscalaCardClick}
               onPautaChipClick={handleCalendarioPautaChipClick}
               onPautaStatusChange={handleCalendarStatusChange}
               canManageDeadlineForPauta={canManagePauta}
+              canDragStreamyard={canDragStreamyard}
             />
           )}
             </>
@@ -2247,6 +2397,20 @@ export function PautasDashboard() {
                 }`}
               >
                 Nova Pauta
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={modalTab === "streamyard"}
+                onClick={() => setModalTab("streamyard")}
+                disabled={modalSaving || escalaSaving}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  modalTab === "streamyard"
+                    ? "border-blue-600 font-semibold text-slate-900"
+                    : "border-transparent font-medium text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Streamyard
               </button>
               {privilegedSession ? (
                 <button
@@ -2317,22 +2481,6 @@ export function PautasDashboard() {
                       className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-50 disabled:opacity-70"
                       placeholder="Resumo ou notas rápidas"
                     />
-                  </div>
-                  <div className="flex items-start gap-2 pt-0.5">
-                    <input
-                      id="modal-pauta-demanda-multimidia"
-                      type="checkbox"
-                      checked={modalDemandaMultimidia}
-                      onChange={(e) => setModalDemandaMultimidia(e.target.checked)}
-                      disabled={modalSaving}
-                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
-                    />
-                    <label
-                      htmlFor="modal-pauta-demanda-multimidia"
-                      className="cursor-pointer text-sm text-slate-700"
-                    >
-                      Demanda Multimídia
-                    </label>
                   </div>
                   {privilegedSession ? (
                     <div>
@@ -2440,6 +2588,45 @@ export function PautasDashboard() {
                   </div>
                 </form>
               </>
+            )}
+
+            {modalTab === "streamyard" && selectedDate && (
+              <div className="mt-4" role="tabpanel">
+                <p className="mb-3 text-sm text-slate-600">
+                  Data:{" "}
+                  <span className="font-medium text-slate-800">
+                    {formatDeadlinePtBR(selectedDate)}
+                  </span>
+                  {editingEscala && isStreamyardTipo(editingEscala.tipo) ? (
+                    <>
+                      {" "}
+                      — editando marcação existente. Use{" "}
+                      <span className="font-medium">Excluir</span> no rodapé
+                      para remover.
+                    </>
+                  ) : null}
+                </p>
+                <StreamyardForm
+                  key={
+                    editingEscala && isStreamyardTipo(editingEscala.tipo)
+                      ? `modal-streamyard-edit-${editingEscala.id}`
+                      : `modal-streamyard-new-${selectedDate}`
+                  }
+                  defaultDateYmd={selectedDate}
+                  initialStreamyard={streamyardFormInitial}
+                  usuarios={modalReporters}
+                  usuariosLoading={modalReportersLoading}
+                  canPickUsuario={privilegedSession}
+                  currentUserId={sessionCtx?.userId ?? ""}
+                  idPrefix="modal-streamyard"
+                  onSuccess={() => {
+                    closeNovaPautaModal();
+                    void refreshDashboardData();
+                  }}
+                  onDirtyChange={setEscalaFormDirty}
+                  onSavingChange={setEscalaSaving}
+                />
+              </div>
             )}
 
             {privilegedSession && modalTab === "escala" && (

@@ -2,13 +2,26 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@supabase/supabase-js";
-import { isEditorRole, isSuperAdminEmail } from "@/lib/admin-acl";
+import { getAdminActor } from "@/app/actions/admin";
+import {
+  canManageStreamyardEntry,
+  isEditorRole,
+  isSuperAdminEmail,
+} from "@/lib/admin-acl";
 import { decemberThroughFirstWeekendNextYearYmds } from "@/lib/escala-planner-spill";
-import { ESCALA_TIPO_PLANTAO } from "@/lib/escala-constants";
+import {
+  ESCALA_TIPO_PLANTAO,
+  ESCALA_TIPO_STREAMYARD,
+  isStreamyardTipo,
+  normalizeStreamyardHorario,
+} from "@/lib/escala-constants";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const ESCALA_ACCESS_DENIED =
   "Acesso negado. Apenas editores podem gerenciar a escala.";
+
+const STREAMYARD_ACCESS_DENIED =
+  "Você não pode gerenciar esta marcação Streamyard.";
 
 function getServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -443,5 +456,251 @@ export async function saveEscalaAction(
   revalidatePath("/");
   revalidatePath("/escala");
   revalidatePath("/escala/plantoes");
+  return { ok: true };
+}
+
+function assertCanManageStreamyardUsuario(
+  actor: {
+    userId: string;
+    email: string;
+    funcao: string | null;
+    isSuperAdmin: boolean;
+    isEditor: boolean;
+  },
+  targetUsuarioId: string
+): { ok: true } | { ok: false; error: string } {
+  if (
+    !canManageStreamyardEntry({
+      currentUserId: actor.userId,
+      currentUserEmail: actor.email,
+      currentUserRole: actor.funcao,
+      entryUsuarioId: targetUsuarioId,
+    })
+  ) {
+    return { ok: false, error: STREAMYARD_ACCESS_DENIED };
+  }
+  return { ok: true };
+}
+
+export async function saveStreamyardAction(
+  editingId: string | null | undefined,
+  row: {
+    usuario_id: string;
+    data_inicio: string;
+    horario: string;
+  }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const usuarioId = row.usuario_id?.trim() ?? "";
+  const dataInicio = row.data_inicio?.trim() ?? "";
+  const horarioNorm = normalizeStreamyardHorario(row.horario);
+
+  if (!usuarioId) {
+    return { ok: false, error: "Selecione um jornalista." };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataInicio)) {
+    return { ok: false, error: "Data inválida." };
+  }
+  if (!horarioNorm) {
+    return { ok: false, error: "Horário inválido." };
+  }
+
+  const perm = assertCanManageStreamyardUsuario(actor, usuarioId);
+  if (!perm.ok) return perm;
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const id = editingId?.trim();
+  if (id) {
+    const { data: existing, error: fetchErr } = await admin
+      .from("escalas")
+      .select("id, tipo, usuario_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr) return { ok: false, error: fetchErr.message };
+    if (!existing || !isStreamyardTipo(existing.tipo)) {
+      return { ok: false, error: "Marcação Streamyard não encontrada." };
+    }
+
+    const existingUid = existing.usuario_id?.trim() ?? "";
+    const editPerm = assertCanManageStreamyardUsuario(actor, existingUid);
+    if (!editPerm.ok) return editPerm;
+  }
+
+  let dupQuery = admin
+    .from("escalas")
+    .select("id")
+    .eq("tipo", ESCALA_TIPO_STREAMYARD)
+    .eq("data_inicio", dataInicio)
+    .eq("usuario_id", usuarioId)
+    .eq("horario", horarioNorm)
+    .limit(1);
+
+  if (id) {
+    dupQuery = dupQuery.neq("id", id);
+  }
+
+  const { data: dupRows, error: dupErr } = await dupQuery;
+
+  if (dupErr) return { ok: false, error: dupErr.message };
+  if (dupRows && dupRows.length > 0) {
+    return {
+      ok: false,
+      error: "Este jornalista já tem Streamyard neste horário neste dia.",
+    };
+  }
+
+  const payload = {
+    tipo: ESCALA_TIPO_STREAMYARD,
+    usuario_id: usuarioId,
+    data_inicio: dataInicio,
+    data_fim: null,
+    coordenador: null,
+    horario: horarioNorm,
+  };
+
+  if (id) {
+    const { error } = await admin.from("escalas").update(payload).eq("id", id);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    const { error } = await admin.from("escalas").insert(payload);
+    if (error) return { ok: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/escala");
+  return { ok: true };
+}
+
+export async function deleteStreamyardAction(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmed = id?.trim();
+  if (!trimmed) {
+    return { ok: false, error: "ID inválido." };
+  }
+
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: existing, error: fetchErr } = await admin
+    .from("escalas")
+    .select("id, tipo, usuario_id")
+    .eq("id", trimmed)
+    .maybeSingle();
+
+  if (fetchErr) return { ok: false, error: fetchErr.message };
+  if (!existing || !isStreamyardTipo(existing.tipo)) {
+    return { ok: false, error: "Marcação Streamyard não encontrada." };
+  }
+
+  const perm = assertCanManageStreamyardUsuario(
+    actor,
+    existing.usuario_id?.trim() ?? ""
+  );
+  if (!perm.ok) return perm;
+
+  const { error } = await admin.from("escalas").delete().eq("id", trimmed);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/");
+  revalidatePath("/escala");
+  return { ok: true };
+}
+
+/** Move uma marcação Streamyard para outro dia (arrastar no calendário). */
+export async function moveStreamyardToDateAction(
+  escalaId: string,
+  targetDateYmd: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const id = escalaId?.trim();
+  const target = targetDateYmd?.trim();
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+    return { ok: false, error: "Dados inválidos." };
+  }
+
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: row, error: fetchErr } = await admin
+    .from("escalas")
+    .select("id, tipo, usuario_id, data_inicio, horario")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (fetchErr) return { ok: false, error: fetchErr.message };
+  if (!row || !isStreamyardTipo(row.tipo)) {
+    return { ok: false, error: "Marcação Streamyard não encontrada." };
+  }
+
+  const uid = row.usuario_id?.trim();
+  const fromDate = row.data_inicio?.trim();
+  const horario = row.horario?.trim();
+  if (!uid || !fromDate || !horario) {
+    return { ok: false, error: "Marcação inválida." };
+  }
+
+  const perm = assertCanManageStreamyardUsuario(actor, uid);
+  if (!perm.ok) return perm;
+
+  if (fromDate === target) {
+    return { ok: true };
+  }
+
+  const { data: dupRows, error: dupErr } = await admin
+    .from("escalas")
+    .select("id")
+    .eq("tipo", ESCALA_TIPO_STREAMYARD)
+    .eq("data_inicio", target)
+    .eq("usuario_id", uid)
+    .eq("horario", horario)
+    .neq("id", id)
+    .limit(1);
+
+  if (dupErr) return { ok: false, error: dupErr.message };
+  if (dupRows && dupRows.length > 0) {
+    return {
+      ok: false,
+      error: "Este jornalista já tem Streamyard neste horário neste dia.",
+    };
+  }
+
+  const { error: updErr } = await admin
+    .from("escalas")
+    .update({ data_inicio: target })
+    .eq("id", id);
+
+  if (updErr) return { ok: false, error: updErr.message };
+
+  revalidatePath("/");
+  revalidatePath("/escala");
   return { ok: true };
 }

@@ -298,10 +298,10 @@ function AdminUsuariosPageContent() {
   );
 
   return (
-    <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-100/80">
-      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col overflow-hidden px-4 py-10 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-slate-100/80">
+      <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
         <PautasAppHeader />
-        <div className="mb-3 mt-6 shrink-0">
+        <div className="mb-3 mt-6">
           <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
             Admin
           </h1>
@@ -309,7 +309,7 @@ function AdminUsuariosPageContent() {
 
         {banner && (
           <div
-            className={`mb-3 shrink-0 rounded-lg border px-3 py-2 text-sm ${
+            className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
               banner.type === "err"
                 ? "border-red-200 bg-red-50 text-red-800"
                 : "border-emerald-200 bg-emerald-50 text-emerald-900"
@@ -320,41 +320,37 @@ function AdminUsuariosPageContent() {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain lg:overflow-hidden">
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5 sm:px-5">
-                <h2 className="text-sm font-semibold text-slate-800">
-                  Usuários
-                </h2>
-                {canCreateUser && (
-                  <Link
-                    href="/admin/novo-usuario"
-                    className="inline-flex items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800"
-                  >
-                    Criar usuário
-                  </Link>
-                )}
-              </div>
-              {loadingList && (
-                <p className="px-4 py-8 text-center text-sm text-slate-500 sm:px-5">
-                  Carregando…
-                </p>
-              )}
-              {!loadingList && listError && (
-                <p className="px-4 py-5 text-center text-sm text-red-700 sm:px-5">
-                  {listError}
-                </p>
-              )}
-              {!loadingList && !listError && rows.length === 0 && (
-                <p className="px-4 py-8 text-center text-sm text-slate-500 sm:px-5">
-                  Nenhum registro na tabela.
-                </p>
-              )}
-              {!loadingList && !listError && rows.length > 0 && (
-                <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-                  <table className="w-full table-fixed divide-y divide-slate-200 text-left text-sm">
-                    <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5 sm:px-5">
+            <h2 className="text-sm font-semibold text-slate-800">Usuários</h2>
+            {canCreateUser && (
+              <Link
+                href="/admin/novo-usuario"
+                className="inline-flex items-center justify-center rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-slate-800"
+              >
+                Criar usuário
+              </Link>
+            )}
+          </div>
+          {loadingList && (
+            <p className="px-4 py-8 text-center text-sm text-slate-500 sm:px-5">
+              Carregando…
+            </p>
+          )}
+          {!loadingList && listError && (
+            <p className="px-4 py-5 text-center text-sm text-red-700 sm:px-5">
+              {listError}
+            </p>
+          )}
+          {!loadingList && !listError && rows.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-slate-500 sm:px-5">
+              Nenhum registro na tabela.
+            </p>
+          )}
+          {!loadingList && !listError && rows.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full table-fixed divide-y divide-slate-200 text-left text-sm">
+                <thead className="bg-slate-50">
                       <tr>
                         <th className="w-[28%] px-3 py-2.5 font-semibold text-slate-700 sm:px-4">
                           Nome
@@ -406,10 +402,8 @@ function AdminUsuariosPageContent() {
                       ))}
                     </tbody>
                   </table>
-                </div>
-              )}
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -587,7 +581,7 @@ export default function AdminUsuariosPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-[100dvh] items-center justify-center bg-slate-100/80 text-sm text-slate-600">
+        <div className="flex min-h-screen items-center justify-center bg-slate-100/80 text-sm text-slate-600">
           Carregando…
         </div>
       }

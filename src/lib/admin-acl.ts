@@ -22,6 +22,19 @@ export function canManageEscala(args: {
   return isSuperAdminEmail(args.email) || isEditorRole(args.funcao);
 }
 
+/** Super admin, Editor ou o próprio jornalista: gerenciar marcação Streamyard. */
+export function canManageStreamyardEntry(args: {
+  currentUserId: string;
+  currentUserEmail: string;
+  currentUserRole: string | null;
+  entryUsuarioId: string | null;
+}): boolean {
+  if (isSuperAdminEmail(args.currentUserEmail)) return true;
+  if (isEditorRole(args.currentUserRole)) return true;
+  const uid = (args.entryUsuarioId ?? "").trim();
+  return uid !== "" && uid === args.currentUserId;
+}
+
 /** Quem pode editar ou excluir uma pauta no painel (super admin, Editor ou autor). */
 export function canUserEditOrDeletePauta(args: {
   currentUserId: string;
