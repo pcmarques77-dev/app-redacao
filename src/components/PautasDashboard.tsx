@@ -302,8 +302,10 @@ function calendarOutsideMonthDayLabel(ymd: string): string {
   return `${String(d).padStart(2, "0")}/${abbr}`;
 }
 
-/** Sobrevive a remontagem do painel após Server Actions / `router.refresh()`. */
-const DASHBOARD_CAL_STORAGE_KEY = "pautas-dashboard-cal-v1";
+import {
+  DASHBOARD_CAL_STORAGE_KEY,
+  PAUTAS_DASHBOARD_HOME_EVENT,
+} from "@/lib/dashboard-home";
 
 type DashboardCalStored = {
   scope: "month" | "week";
@@ -1146,6 +1148,16 @@ export function PautasDashboard() {
     }
   }, [calendarScope, calendarMonth, calendarWeekStart, viewMode]);
 
+  useEffect(() => {
+    const onDashboardHome = () => {
+      setViewMode("calendario");
+    };
+    window.addEventListener(PAUTAS_DASHBOARD_HOME_EVENT, onDashboardHome);
+    return () => {
+      window.removeEventListener(PAUTAS_DASHBOARD_HOME_EVENT, onDashboardHome);
+    };
+  }, []);
+
   const handleCalendarScopeChange = useCallback((s: "month" | "week") => {
     setCalendarScope(s);
     if (s === "week") {
@@ -1166,6 +1178,7 @@ export function PautasDashboard() {
   const [modalReportersError, setModalReportersError] = useState<string | null>(null);
   const [modalReporterId, setModalReporterId] = useState("");
   const [modalEditoria, setModalEditoria] = useState("Últimas Notícias");
+  const [modalStatus, setModalStatus] = useState<PautaStatus>("Sugerida");
   const [pautaCalendarioSomenteLeitura, setPautaCalendarioSomenteLeitura] =
     useState<PautaRow | null>(null);
   const [modalTab, setModalTab] = useState<"pauta" | "streamyard" | "escala">(
@@ -1282,6 +1295,12 @@ export function PautasDashboard() {
         : false,
     [sessionCtx]
   );
+
+  const opcoesReportersFiltro = useMemo(() => {
+    if (privilegedSession) return opcoesReporters;
+    const nome = sessionCtx?.nome?.trim();
+    return nome ? [nome] : [];
+  }, [privilegedSession, opcoesReporters, sessionCtx?.nome]);
 
   const pautasPorDia = useMemo(() => {
     const m = new Map<string, PautaRow[]>();
@@ -1446,6 +1465,12 @@ export function PautasDashboard() {
       cancelled = true;
     };
   }, [escalaQueryInput]);
+
+  useEffect(() => {
+    if (!sessionCtx || privilegedSession) return;
+    const nome = sessionCtx.nome?.trim();
+    if (nome) setFiltroReporter(nome);
+  }, [sessionCtx, privilegedSession]);
 
   useEffect(() => {
     if (!isModalOpen || !sessionCtx || privilegedSession) return;
@@ -1721,6 +1746,7 @@ export function PautasDashboard() {
     setModalResumo("");
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
+    setModalStatus("Sugerida");
     setModalSaving(false);
     setModalError(null);
     setModalReportersError(null);
@@ -1785,6 +1811,7 @@ export function PautasDashboard() {
     setModalResumo("");
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
+    setModalStatus("Sugerida");
     setModalError(null);
     setModalReportersError(null);
     setModalTab("pauta");
@@ -1816,6 +1843,7 @@ export function PautasDashboard() {
         setModalResumo("");
         setModalReporterId("");
         setModalEditoria("Últimas Notícias");
+        setModalStatus("Sugerida");
         setModalError(null);
         setModalReportersError(null);
         setModalTab("streamyard");
@@ -1837,6 +1865,7 @@ export function PautasDashboard() {
       setModalResumo("");
       setModalReporterId("");
       setModalEditoria("Últimas Notícias");
+      setModalStatus("Sugerida");
       setModalError(null);
       setModalReportersError(null);
       setModalTab("escala");
@@ -1874,7 +1903,7 @@ export function PautasDashboard() {
           ? modalReporterId.trim()
           : sessionCtx!.userId,
         editoria: modalEditoria,
-        status: "Sugerida",
+        status: modalStatus,
         arquivos_urls: [],
         demanda_multimidia: false,
       });
@@ -1892,6 +1921,7 @@ export function PautasDashboard() {
       modalEditoria,
       modalReporterId,
       modalResumo,
+      modalStatus,
       modalTitulo,
       privilegedSession,
       selectedDate,
@@ -1910,10 +1940,13 @@ export function PautasDashboard() {
           id="filtro-reporter"
           value={filtroReporter}
           onChange={(e) => setFiltroReporter(e.target.value)}
-          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white py-2.5 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 md:w-56"
+          disabled={!privilegedSession}
+          className="w-full min-w-0 rounded-lg border border-slate-300 bg-white py-2.5 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-default disabled:bg-slate-50 md:w-56"
         >
-          <option value="Todos">Todos os Jornalistas</option>
-          {opcoesReporters.map((nome) => (
+          {privilegedSession ? (
+            <option value="Todos">Todos os Jornalistas</option>
+          ) : null}
+          {opcoesReportersFiltro.map((nome) => (
             <option key={nome} value={nome}>
               {nome}
             </option>
@@ -2573,6 +2606,29 @@ export function PautasDashboard() {
                       {EDITORIA_OPTIONS.map((ed) => (
                         <option key={ed} value={ed}>
                           {ed}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="modal-pauta-status"
+                      className="block text-sm font-medium text-slate-700"
+                    >
+                      Status
+                    </label>
+                    <select
+                      id="modal-pauta-status"
+                      value={modalStatus}
+                      onChange={(e) =>
+                        setModalStatus(e.target.value as PautaStatus)
+                      }
+                      disabled={modalSaving}
+                      className="mt-1 w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
+                    >
+                      {STATUS_OPTIONS.map(({ value, label }) => (
+                        <option key={value} value={value}>
+                          {label}
                         </option>
                       ))}
                     </select>

@@ -156,7 +156,10 @@ export async function listPautasDashboardAction(): Promise<
     )
     .order("deadline", { ascending: true, nullsFirst: false });
 
-  const { data, error } = await q;
+  const privileged = actor.isSuperAdmin || actor.isEditor;
+  const { data, error } = await (privileged
+    ? q
+    : q.eq("reporter_id", actor.userId));
   if (error) return { ok: false, error: error.message };
   const rows = ((data ?? []) as unknown as PautaDashboardRow[]).map((row) => {
     const rawStatus =

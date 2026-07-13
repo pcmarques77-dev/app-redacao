@@ -67,11 +67,12 @@ export async function loadDashboardAction(
 
   const { rangeStart, rangeEnd } = dashboardEscalaQueryRange(input);
 
-  const [pautasResult, escalasResult, reportersResult] = await Promise.all([
-    admin
-      .from("pautas")
-      .select(
-        `
+  const privileged = actor.isSuperAdmin || actor.isEditor;
+
+  let pautasQuery = admin
+    .from("pautas")
+    .select(
+      `
           id,
           titulo_provisorio,
           editoria,
@@ -81,10 +82,19 @@ export async function loadDashboardAction(
           demanda_multimidia,
           reporter:usuarios!pautas_reporter_id_fkey(nome)
         `
-      )
-      .order("deadline", { ascending: true, nullsFirst: false }),
+    )
+    .order("deadline", { ascending: true, nullsFirst: false });
+
+  if (!privileged) {
+    pautasQuery = pautasQuery.eq("reporter_id", actor.userId);
+  }
+
+  const [pautasResult, escalasResult, reportersResult] = await Promise.all([
+    pautasQuery,
     queryEscalasOverlappingRange(admin, rangeStart, rangeEnd),
-    admin.from("usuarios").select("id, nome").order("nome", { ascending: true }),
+    privileged
+      ? admin.from("usuarios").select("id, nome").order("nome", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (pautasResult.error) {

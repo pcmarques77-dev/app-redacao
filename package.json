@@ -12,7 +12,8 @@
     "start": "next start",
     "lint": "next lint",
     "ronda:push-snapshot": "tsx --tsconfig tsconfig.json scripts/ronda-rss-push-snapshot.ts",
-    "auth:set-initial-passwords": "tsx --tsconfig tsconfig.json scripts/set-initial-team-passwords.ts"
+    "auth:set-initial-passwords": "tsx --tsconfig tsconfig.json scripts/set-initial-team-passwords.ts",
+    "pautas:import": "tsx --tsconfig tsconfig.json scripts/import-pautas-csv.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.0",

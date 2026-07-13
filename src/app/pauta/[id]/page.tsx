@@ -6,10 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
-  type ChangeEvent,
-  type DragEvent,
   type FormEvent,
 } from "react";
 import {
@@ -36,196 +33,10 @@ type ReporterOption = {
   nome: string | null;
 };
 
-const ALLOWED_MIME = new Set([
-  "application/pdf",
-  "audio/mpeg",
-  "audio/wav",
-  "audio/x-wav",
-  "audio/wave",
-  "image/jpeg",
-  "image/png",
-]);
-
-const ALLOWED_EXT = new Set(["pdf", "mp3", "wav", "jpg", "jpeg", "png"]);
-
-function isAllowedFile(file: File): boolean {
-  if (file.type && ALLOWED_MIME.has(file.type)) return true;
-  const ext = file.name.split(".").pop()?.toLowerCase();
-  return ext != null && ALLOWED_EXT.has(ext);
-}
-
-function cleanStorageFileName(originalName: string): string {
-  const base = originalName.replace(/[/\\]/g, "").trim() || "arquivo";
-  const cleaned = base
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9.-]/g, "_");
-  return cleaned || "arquivo";
-}
-
-function normalizeArquivosUrls(raw: unknown): string[] {
-  if (raw == null) return [];
-  if (Array.isArray(raw)) {
-    return raw.filter((x): x is string => typeof x === "string" && x.trim() !== "");
-  }
-  if (typeof raw === "string") {
-    try {
-      const p = JSON.parse(raw) as unknown;
-      return Array.isArray(p)
-        ? p.filter((x): x is string => typeof x === "string" && x.trim() !== "")
-        : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function displayNameFromUrl(url: string): string {
-  try {
-    const seg = decodeURIComponent(
-      url.split("/").pop()?.split("?")[0] ?? "arquivo"
-    );
-    return seg.replace(/^\d+-/, "") || seg;
-  } catch {
-    return "arquivo";
-  }
-}
-
-function urlMediaKind(url: string): "image" | "audio" | "pdf" | "unknown" {
-  const u = url.toLowerCase();
-  if (/\.(jpe?g|png)(\?|$)/.test(u)) return "image";
-  if (/\.(mp3|wav)(\?|$)/.test(u)) return "audio";
-  if (/\.pdf(\?|$)/.test(u)) return "pdf";
-  return "unknown";
-}
-
-function IconTrash() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M3 6h18" />
-      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-      <line x1="10" x2="10" y1="11" y2="17" />
-      <line x1="14" x2="14" y1="11" y2="17" />
-    </svg>
-  );
-}
-
-function IconDocument() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="28"
-      height="28"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="text-slate-500"
-      aria-hidden
-    >
-      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-      <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
-}
-
-function ArquivoReferenciaItem({
-  url,
-  onRemove,
-  showRemove = true,
-}: {
-  url: string;
-  onRemove: () => void;
-  showRemove?: boolean;
-}) {
-  const name = displayNameFromUrl(url);
-  const kind = urlMediaKind(url);
-
-  return (
-    <li className="rounded-lg border border-slate-200 bg-slate-50/80 p-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 break-all text-sm font-medium text-slate-800">
-          {name}
-        </p>
-        {showRemove ? (
-          <button
-            type="button"
-            onClick={onRemove}
-            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-red-700 shadow-sm hover:bg-red-50"
-            aria-label={`Remover ${name}`}
-          >
-            <IconTrash />
-            Remover
-          </button>
-        ) : null}
-      </div>
-      <div className="mt-3">
-        {kind === "image" && (
-          <button
-            type="button"
-            onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
-            className="block overflow-hidden rounded-md border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-400"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={url}
-              alt={name}
-              className="max-h-28 w-auto max-w-full object-contain"
-            />
-          </button>
-        )}
-        {kind === "audio" && (
-          <audio controls className="h-8 w-full" preload="metadata">
-            <source src={url} />
-          </audio>
-        )}
-        {kind === "pdf" && (
-          <div className="flex flex-wrap items-center gap-3">
-            <IconDocument />
-            <button
-              type="button"
-              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
-              className="rounded-md bg-slate-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700"
-            >
-              Visualizar PDF
-            </button>
-          </div>
-        )}
-        {kind === "unknown" && (
-          <a
-            href={url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-slate-700 underline hover:text-slate-900"
-          >
-            Abrir arquivo
-          </a>
-        )}
-      </div>
-    </li>
-  );
-}
-
 export default function EditarPauta() {
   const params = useParams();
   const id = params?.id as string;
   const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = useState(true);
   const [erroCarregamento, setErroCarregamento] = useState<string | null>(null);
@@ -237,15 +48,10 @@ export default function EditarPauta() {
   const [reporterId, setReporterId] = useState("");
   const [deadline, setDeadline] = useState("");
   const [status, setStatus] = useState<PautaStatus>("Sugerida");
-  const [demandaMultimidia, setDemandaMultimidia] = useState(false);
-  const [arquivosUrls, setArquivosUrls] = useState<string[]>([]);
 
   const [salvando, setSalvando] = useState(false);
   const [excluindo, setExcluindo] = useState(false);
   const [erroForm, setErroForm] = useState<string | null>(null);
-  const [uploadBusy, setUploadBusy] = useState(false);
-  const [uploadErro, setUploadErro] = useState<string | null>(null);
-  const [dragActive, setDragActive] = useState(false);
 
   const [sessionCtx, setSessionCtx] = useState<{
     userId: string;
@@ -311,7 +117,7 @@ export default function EditarPauta() {
         supabase
           .from("pautas")
           .select(
-            "titulo_provisorio, fontes, arquivos_urls, editoria, deadline, status, reporter_id, demanda_multimidia"
+            "titulo_provisorio, fontes, editoria, deadline, reporter_id, status"
           )
           .eq("id", id)
           .maybeSingle(),
@@ -340,24 +146,20 @@ export default function EditarPauta() {
       const row = pautaRes.data as {
         titulo_provisorio: string | null;
         fontes: string | null;
-        arquivos_urls: unknown;
         editoria: string | null;
         deadline: string | null;
-        status: string | null;
         reporter_id: string | null;
-        demanda_multimidia: boolean | null;
+        status: string | null;
       };
 
       setReporters((repResult.rows as ReporterOption[]) ?? []);
       setTituloProvisorio(row.titulo_provisorio?.trim() ?? "");
       setFontes(row.fontes?.trim() ?? "");
-      setArquivosUrls(normalizeArquivosUrls(row.arquivos_urls));
       setEditoria(row.editoria?.trim() || "Últimas Notícias");
       setReporterId(row.reporter_id?.trim() ?? "");
       setRowReporterId(row.reporter_id?.trim() ? row.reporter_id.trim() : null);
       setDeadline(parseDeadlineToYmd(row.deadline) ?? "");
       setStatus(coercePautaStatus(row.status));
-      setDemandaMultimidia(row.demanda_multimidia === true);
       setLoading(false);
     };
 
@@ -367,106 +169,6 @@ export default function EditarPauta() {
       cancelled = true;
     };
   }, [id]);
-
-  const processFilesForUpload = useCallback(
-    async (files: FileList | File[]) => {
-      const list = Array.from(files);
-      if (list.length === 0) return;
-
-      const rejected = list.filter((f) => !isAllowedFile(f));
-      if (rejected.length > 0) {
-        setUploadErro(
-          "Use apenas PDF, MP3, WAV, JPG ou PNG."
-        );
-        return;
-      }
-
-      setUploadErro(null);
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!url?.trim() || !key?.trim()) {
-        setUploadErro("Supabase não configurado (.env.local).");
-        return;
-      }
-
-      if (!id?.trim()) return;
-
-      setUploadBusy(true);
-      const supabase = createBrowserClient();
-      const novasUrls: string[] = [];
-
-      try {
-        let stamp = Date.now();
-        for (const file of list) {
-          const cleanFileName = cleanStorageFileName(file.name);
-          const objectPath = `${stamp}-${cleanFileName}`;
-          stamp += 1;
-
-          const { data: upData, error: upErr } = await supabase.storage
-            .from("arquivos_pauta")
-            .upload(objectPath, file, {
-              cacheControl: "3600",
-              upsert: false,
-              contentType: file.type || undefined,
-            });
-
-          if (upErr) {
-            setUploadErro(upErr.message || "Falha no upload.");
-            break;
-          }
-
-          const { data: pub } = supabase.storage
-            .from("arquivos_pauta")
-            .getPublicUrl(upData.path);
-
-          if (pub?.publicUrl) novasUrls.push(pub.publicUrl);
-        }
-
-        if (novasUrls.length > 0) {
-          setArquivosUrls((prev) => [...prev, ...novasUrls]);
-        }
-      } finally {
-        setUploadBusy(false);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      }
-    },
-    [id]
-  );
-
-  const handleFileInputChange = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (files?.length) void processFilesForUpload(files);
-    },
-    [processFilesForUpload]
-  );
-
-  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-  }, []);
-
-  const handleDrop = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setDragActive(false);
-      const files = e.dataTransfer.files;
-      if (files?.length) void processFilesForUpload(files);
-    },
-    [processFilesForUpload]
-  );
-
-  const removeArquivoAt = useCallback((index: number) => {
-    setArquivosUrls((prev) => prev.filter((_, i) => i !== index));
-  }, []);
 
   const handleSubmit = useCallback(
     async (e: FormEvent<HTMLFormElement>) => {
@@ -511,11 +213,11 @@ export default function EditarPauta() {
       const updateRes = await updatePautaAction(id, {
         titulo_provisorio: titulo,
         fontes: fontes.trim() || null,
-        arquivos_urls: arquivosUrls,
+        arquivos_urls: [],
         editoria,
         deadline: deadlineFinal,
         status,
-        demanda_multimidia: demandaMultimidia,
+        demanda_multimidia: false,
         reporter_id: reporterId.trim(),
       });
 
@@ -533,7 +235,6 @@ export default function EditarPauta() {
       router.push("/");
     },
     [
-      arquivosUrls,
       deadline,
       editoria,
       fontes,
@@ -543,7 +244,6 @@ export default function EditarPauta() {
       router,
       sessionCtx,
       status,
-      demandaMultimidia,
       tituloProvisorio,
     ]
   );
@@ -592,7 +292,7 @@ export default function EditarPauta() {
 
   return (
     <div className="min-h-screen bg-slate-100/80">
-      <div className="mx-auto flex min-h-screen max-w-page flex-col px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto flex min-h-screen max-w-2xl flex-col px-4 py-8 sm:px-6 lg:max-w-3xl lg:px-8">
         <div className="mb-6">
           <Link
             href="/"
@@ -726,99 +426,6 @@ export default function EditarPauta() {
                 </div>
                 <div>
                   <label
-                    htmlFor="edit-fontes"
-                    className="block text-sm font-medium text-slate-700"
-                  >
-                    Fontes e links
-                  </label>
-                  <textarea
-                    id="edit-fontes"
-                    name="fontes"
-                    value={fontes}
-                    onChange={(ev) => setFontes(ev.target.value)}
-                    readOnly={!editable}
-                    rows={4}
-                    placeholder="Fontes e links"
-                    className="mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 read-only:bg-slate-50"
-                  />
-                </div>
-
-                <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-4">
-                  <h3 className="text-sm font-semibold text-slate-800">
-                    Arquivos de referência
-                  </h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    PDF, MP3, WAV, JPG ou PNG. Os arquivos são enviados na hora para
-                    o armazenamento.
-                  </p>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept=".pdf,.mp3,.wav,.jpg,.jpeg,.png,audio/*,image/*,application/pdf"
-                    onChange={handleFileInputChange}
-                    className="sr-only"
-                    id="arquivos-referencia-input"
-                    disabled={uploadBusy || !editable}
-                    aria-label="Selecionar arquivos de referência"
-                  />
-                  <div
-                    onDragOver={editable ? handleDragOver : undefined}
-                    onDragLeave={editable ? handleDragLeave : undefined}
-                    onDrop={editable ? handleDrop : undefined}
-                    className={`mt-3 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors ${
-                      dragActive
-                        ? "border-slate-500 bg-slate-100"
-                        : "border-slate-300 bg-white"
-                    } ${uploadBusy || !editable ? "pointer-events-none opacity-60" : ""}`}
-                  >
-                    <p className="text-sm font-medium text-slate-700">
-                      {editable
-                        ? "Arraste arquivos aqui"
-                        : "Upload disponível apenas para quem pode editar a pauta."}
-                    </p>
-                    {editable && (
-                      <p className="mt-1 text-xs text-slate-500">
-                        Vários arquivos de uma vez
-                      </p>
-                    )}
-                    {editable && (
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploadBusy}
-                        className="mt-4 inline-flex rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:opacity-60"
-                      >
-                        Selecionar arquivos
-                      </button>
-                    )}
-                  </div>
-                  {uploadBusy && (
-                    <p className="mt-2 text-center text-xs text-slate-600" role="status">
-                      Enviando…
-                    </p>
-                  )}
-                  {uploadErro && (
-                    <p className="mt-2 text-center text-sm text-red-700" role="alert">
-                      {uploadErro}
-                    </p>
-                  )}
-                  {arquivosUrls.length > 0 && (
-                    <ul className="mt-4 space-y-3">
-                      {arquivosUrls.map((u, i) => (
-                        <ArquivoReferenciaItem
-                          key={`${u}-${i}`}
-                          url={u}
-                          onRemove={() => removeArquivoAt(i)}
-                          showRemove={editable}
-                        />
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <div>
-                  <label
                     htmlFor="edit-status"
                     className="block text-sm font-medium text-slate-700"
                   >
@@ -839,22 +446,25 @@ export default function EditarPauta() {
                     ))}
                   </select>
                 </div>
-                <div className="flex items-start gap-2 pt-0.5">
-                  <input
-                    id="edit-demanda-multimidia"
-                    type="checkbox"
-                    checked={demandaMultimidia}
-                    onChange={(ev) => setDemandaMultimidia(ev.target.checked)}
-                    disabled={!editable}
-                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-slate-900 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  />
+                <div>
                   <label
-                    htmlFor="edit-demanda-multimidia"
-                    className={`text-sm ${editable ? "cursor-pointer text-slate-700" : "text-slate-500"}`}
+                    htmlFor="edit-fontes"
+                    className="block text-sm font-medium text-slate-700"
                   >
-                    Demanda Multimídia
+                    Fontes e links
                   </label>
+                  <textarea
+                    id="edit-fontes"
+                    name="fontes"
+                    value={fontes}
+                    onChange={(ev) => setFontes(ev.target.value)}
+                    readOnly={!editable}
+                    rows={4}
+                    placeholder="Fontes e links"
+                    className="mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 read-only:bg-slate-50"
+                  />
                 </div>
+
                 {erroForm && (
                   <p className="text-sm text-red-700" role="alert">
                     {erroForm}
@@ -864,12 +474,7 @@ export default function EditarPauta() {
                   {canEditOrDelete ? (
                     <button
                       type="submit"
-                      disabled={
-                        salvando ||
-                        excluindo ||
-                        reporters.length === 0 ||
-                        uploadBusy
-                      }
+                      disabled={salvando || excluindo || reporters.length === 0}
                       className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {salvando ? "Salvando…" : "Salvar"}
@@ -887,7 +492,7 @@ export default function EditarPauta() {
                     <button
                       type="button"
                       onClick={() => void handleExcluir()}
-                      disabled={salvando || excluindo || uploadBusy}
+                      disabled={salvando || excluindo}
                       className="rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-800 shadow-sm transition-colors hover:bg-red-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {excluindo ? "Excluindo…" : "Excluir pauta"}

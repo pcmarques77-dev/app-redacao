@@ -1,10 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import logoVivaTaglineAzul from "@/assets/logo-viva-tagline-azul.svg";
 import { isEditorRole, isSuperAdminEmail } from "@/lib/admin-acl";
+import {
+  CALENDARIO_PAUTAS_PATH,
+  clearDashboardCalStorage,
+  dispatchDashboardHomeEvent,
+} from "@/lib/dashboard-home";
 import {
   createBrowserClient,
   ensureSupabaseAuthReady,
@@ -17,6 +22,7 @@ import {
  */
 export function PautasAppHeader() {
   const pathname = usePathname();
+  const router = useRouter();
   const [sessionCtx, setSessionCtx] = useState<{
     userId: string;
     email: string;
@@ -68,8 +74,6 @@ export function PautasAppHeader() {
     [sessionCtx]
   );
 
-  const dashboardHeadline =
-    process.env.NEXT_PUBLIC_TITULO_DASHBOARD || "Painel de Pautas";
   const logoVivaTaglineSrc =
     typeof logoVivaTaglineAzul === "string"
       ? logoVivaTaglineAzul
@@ -79,6 +83,18 @@ export function PautasAppHeader() {
   const onRadar = pathname.startsWith("/ronda-rss");
   const onPlantoes = pathname.startsWith("/escala/plantoes");
   const onNovaPauta = pathname.startsWith("/nova-pauta");
+
+  const handleLogoClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      if (pathname !== CALENDARIO_PAUTAS_PATH) return;
+      e.preventDefault();
+      clearDashboardCalStorage();
+      dispatchDashboardHomeEvent();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      router.refresh();
+    },
+    [pathname, router]
+  );
 
   const outlineNavBase =
     "inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm shadow-sm transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2";
@@ -90,8 +106,9 @@ export function PautasAppHeader() {
       <div>
         <h1 className="m-0">
           <Link
-            href="/"
-            aria-label={dashboardHeadline}
+            href={CALENDARIO_PAUTAS_PATH}
+            onClick={handleLogoClick}
+            aria-label="Ir para o Calendário de pautas"
             className="inline-block max-w-full cursor-pointer rounded-sm text-left transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
             {/* eslint-disable-next-line @next/next/no-img-element -- SVG vetorial importado de assets */}
