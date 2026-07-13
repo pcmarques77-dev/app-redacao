@@ -1,20 +1,24 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getAdminActor } from "@/app/actions/admin";
 import {
   canManageStreamyardEntry,
   isEditorRole,
   isSuperAdminEmail,
 } from "@/lib/admin-acl";
-import { decemberThroughFirstWeekendNextYearYmds } from "@/lib/escala-planner-spill";
 import {
   ESCALA_TIPO_PLANTAO,
   ESCALA_TIPO_STREAMYARD,
   isStreamyardTipo,
   normalizeStreamyardHorario,
 } from "@/lib/escala-constants";
+import {
+  dashboardEscalaQueryRange,
+  plannerQueryRangeYm,
+  type DashboardEscalaQueryInput,
+} from "@/lib/escala-query-range";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const ESCALA_ACCESS_DENIED =
@@ -44,11 +48,67 @@ export type EscalaDashboardRow = {
   usuarios: { nome: string | null } | null;
 };
 
+const ESCALA_DASHBOARD_SELECT = `
+        id,
+        tipo,
+        usuario_id,
+        data_inicio,
+        data_fim,
+        coordenador,
+        horario,
+        usuarios ( nome )
+      `;
+
+/** Escalas que intersectam um intervalo de datas (plantões, férias, feriados, Streamyard). */
+export async function queryEscalasOverlappingRange(
+  admin: SupabaseClient,
+  rangeStart: string,
+  rangeEnd: string
+): Promise<
+  | { ok: true; rows: EscalaDashboardRow[] }
+  | { ok: false; error: string }
+> {
+  const [{ data: inRange, error: e1 }, { data: crossesIn, error: e2 }] =
+    await Promise.all([
+      admin
+        .from("escalas")
+        .select(ESCALA_DASHBOARD_SELECT)
+        .gte("data_inicio", rangeStart)
+        .lte("data_inicio", rangeEnd),
+      admin
+        .from("escalas")
+        .select(ESCALA_DASHBOARD_SELECT)
+        .lt("data_inicio", rangeStart)
+        .not("data_fim", "is", null)
+        .gte("data_fim", rangeStart),
+    ]);
+
+  if (e1) return { ok: false, error: e1.message };
+  if (e2) return { ok: false, error: e2.message };
+
+  const map = new Map<string, EscalaDashboardRow>();
+  const ingest = (rows: unknown) => {
+    for (const row of (rows ?? []) as EscalaDashboardRow[]) {
+      map.set(row.id, row);
+    }
+  };
+  ingest(inRange);
+  ingest(crossesIn);
+
+  const rows = [...map.values()].sort((a, b) =>
+    (a.data_inicio ?? "").localeCompare(b.data_inicio ?? "")
+  );
+
+  return { ok: true, rows };
+}
+
 /**
- * Lista escalas para o painel. Usa service role no join com `usuarios`, pois no cliente
- * o embed `usuarios (nome)` fica vazio para outros IDs quando o RLS de `usuarios` é restritivo.
+ * Lista escalas para o painel no intervalo visível do calendário.
+ * Usa service role no join com `usuarios`, pois no cliente o embed fica vazio com RLS restritivo.
  */
-export async function listEscalasForDashboardAction(): Promise<
+export async function listEscalasForDashboardAction(
+  input: DashboardEscalaQueryInput
+): Promise<
   | { ok: true; rows: EscalaDashboardRow[] }
   | { ok: false; error: string }
 > {
@@ -69,26 +129,8 @@ export async function listEscalasForDashboardAction(): Promise<
     };
   }
 
-  const { data, error } = await admin
-    .from("escalas")
-    .select(
-      `
-        id,
-        tipo,
-        usuario_id,
-        data_inicio,
-        data_fim,
-        coordenador,
-        horario,
-        usuarios ( nome )
-      `
-    )
-    .order("data_inicio", { ascending: true });
-
-  if (error) {
-    return { ok: false, error: error.message };
-  }
-  return { ok: true, rows: (data ?? []) as unknown as EscalaDashboardRow[] };
+  const { rangeStart, rangeEnd } = dashboardEscalaQueryRange(input);
+  return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd);
 }
 
 async function assertCanManageEscala(
@@ -110,58 +152,6 @@ async function assertCanManageEscala(
     return { ok: true };
   }
   return { ok: false, error: ESCALA_ACCESS_DENIED };
-}
-
-function monthBoundsYm(year: number, monthIndex: number): {
-  monthStart: string;
-  monthEnd: string;
-} {
-  const monthStart = `${year}-${String(monthIndex + 1).padStart(2, "0")}-01`;
-  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
-  const monthEnd = `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
-  return { monthStart, monthEnd };
-}
-
-function dateToYmdLocal(d: Date): string {
-  const y = d.getFullYear();
-  const m = d.getMonth() + 1;
-  const day = d.getDate();
-  return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-}
-
-/**
- * Intervalo de `data_inicio` a carregar no planejador: inclui um dia extra quando o
- * fim de semana “atravessa” o limite do mês (ex.: sábado 31/10 + domingo 01/11).
- */
-function plannerQueryRangeYm(year: number, monthIndex: number): {
-  rangeStart: string;
-  rangeEnd: string;
-} {
-  const { monthStart, monthEnd } = monthBoundsYm(year, monthIndex);
-  let rangeStart = monthStart;
-  let rangeEnd = monthEnd;
-
-  const firstOfMonth = new Date(year, monthIndex, 1);
-  if (firstOfMonth.getDay() === 0) {
-    const prevSat = new Date(year, monthIndex, 0);
-    if (prevSat.getDay() === 6) {
-      rangeStart = dateToYmdLocal(prevSat);
-    }
-  }
-
-  const lastOfMonth = new Date(year, monthIndex + 1, 0);
-  if (lastOfMonth.getDay() === 6) {
-    const nextSun = new Date(year, monthIndex + 1, 1);
-    rangeEnd = dateToYmdLocal(nextSun);
-  }
-
-  if (monthIndex === 11) {
-    const spill = decemberThroughFirstWeekendNextYearYmds(year);
-    const spillEnd = spill[spill.length - 1];
-    if (spillEnd && spillEnd > rangeEnd) rangeEnd = spillEnd;
-  }
-
-  return { rangeStart, rangeEnd };
 }
 
 /**
@@ -197,51 +187,8 @@ export async function listEscalasOverlappingMonthPlannerAction(
     };
   }
 
-  const sel = `
-        id,
-        tipo,
-        usuario_id,
-        data_inicio,
-        data_fim,
-        coordenador,
-        horario,
-        usuarios ( nome )
-      `;
-
   const { rangeStart, rangeEnd } = plannerQueryRangeYm(year, monthIndex);
-
-  const [{ data: inMonth, error: e1 }, { data: crossesIn, error: e2 }] =
-    await Promise.all([
-      admin
-        .from("escalas")
-        .select(sel)
-        .gte("data_inicio", rangeStart)
-        .lte("data_inicio", rangeEnd),
-      admin
-        .from("escalas")
-        .select(sel)
-        .lt("data_inicio", rangeStart)
-        .not("data_fim", "is", null)
-        .gte("data_fim", rangeStart),
-    ]);
-
-  if (e1) return { ok: false, error: e1.message };
-  if (e2) return { ok: false, error: e2.message };
-
-  const map = new Map<string, EscalaDashboardRow>();
-  const ingest = (rows: unknown) => {
-    for (const row of (rows ?? []) as EscalaDashboardRow[]) {
-      map.set(row.id, row);
-    }
-  };
-  ingest(inMonth);
-  ingest(crossesIn);
-
-  const rows = [...map.values()].sort((a, b) =>
-    (a.data_inicio ?? "").localeCompare(b.data_inicio ?? "")
-  );
-
-  return { ok: true, rows };
+  return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd);
 }
 
 /** Adiciona um plantão na data. Permite vários por dia; evita repetir o mesmo jornalista no mesmo dia. */

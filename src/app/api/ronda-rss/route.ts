@@ -41,7 +41,9 @@ const JSON_NO_STORE = {
 } as const;
 
 function rondaRssSnapshotEnvEnabled(): boolean {
-  return process.env.RONDA_RSS_USE_SUPABASE_SNAPSHOT === "1";
+  if (process.env.RONDA_RSS_USE_SUPABASE_SNAPSHOT === "0") return false;
+  if (process.env.RONDA_RSS_USE_SUPABASE_SNAPSHOT === "1") return true;
+  return process.env.NODE_ENV === "production";
 }
 
 function cachedAggregator(kind: RondaRssKind) {

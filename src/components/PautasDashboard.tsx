@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -21,15 +20,18 @@ import {
   isSuperAdminEmail,
 } from "@/lib/admin-acl";
 import { isStreamyardTipo } from "@/lib/escala-constants";
-import { listEscalasForDashboardAction, moveStreamyardToDateAction } from "@/app/actions/escalas";
+import { loadDashboardAction } from "@/app/actions/dashboard";
+import {
+  listEscalasForDashboardAction,
+  moveStreamyardToDateAction,
+} from "@/app/actions/escalas";
 import {
   createPautaAction,
   deletePautasAction,
-  getPautaSessionAction,
-  listPautasDashboardAction,
   listReportersForSessionAction,
   updatePautaAction,
 } from "@/app/actions/pautas";
+import type { LoadDashboardInput } from "@/app/actions/dashboard";
 import {
   PAUTA_ACCESS_DENIED,
   coercePautaStatus,
@@ -309,6 +311,17 @@ type DashboardCalStored = {
   weekStartMs: number;
   viewMode: "lista" | "calendario";
 };
+
+function readDashboardCalFromStorage(): DashboardCalStored | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return parseDashboardCalStored(
+      sessionStorage.getItem(DASHBOARD_CAL_STORAGE_KEY)
+    );
+  } catch {
+    return null;
+  }
+}
 
 function parseDashboardCalStored(raw: string | null): DashboardCalStored | null {
   if (!raw?.trim()) return null;
@@ -1092,28 +1105,28 @@ export function PautasDashboard() {
     funcao: string | null;
   } | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
-  const [viewMode, setViewMode] = useState<"lista" | "calendario">("calendario");
+  const [viewMode, setViewMode] = useState<"lista" | "calendario">(() => {
+    const p = readDashboardCalFromStorage();
+    return p?.viewMode ?? "calendario";
+  });
   const [calendarMonth, setCalendarMonth] = useState(() => {
+    const p = readDashboardCalFromStorage();
+    if (p) return new Date(p.monthMs);
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
-  const [calendarScope, setCalendarScope] = useState<"month" | "week">("month");
-  const [calendarWeekStart, setCalendarWeekStart] = useState(() =>
-    startOfWeekMonday(new Date())
-  );
+  const [calendarScope, setCalendarScope] = useState<"month" | "week">(() => {
+    const p = readDashboardCalFromStorage();
+    return p?.scope ?? "month";
+  });
+  const [calendarWeekStart, setCalendarWeekStart] = useState(() => {
+    const p = readDashboardCalFromStorage();
+    if (p) return new Date(p.weekStartMs);
+    return startOfWeekMonday(new Date());
+  });
 
   const skipFirstCalPersistRef = useRef(true);
-
-  useLayoutEffect(() => {
-    const p = parseDashboardCalStored(
-      sessionStorage.getItem(DASHBOARD_CAL_STORAGE_KEY)
-    );
-    if (!p) return;
-    setCalendarScope(p.scope);
-    setCalendarMonth(new Date(p.monthMs));
-    setCalendarWeekStart(new Date(p.weekStartMs));
-    setViewMode(p.viewMode);
-  }, []);
+  const skipEscalaRangeReloadRef = useRef(true);
 
   useEffect(() => {
     if (skipFirstCalPersistRef.current) {
@@ -1331,38 +1344,52 @@ export function PautasDashboard() {
     [sortColumn]
   );
 
+  const escalaQueryInput = useMemo((): LoadDashboardInput => {
+    return {
+      escalaScope: calendarScope,
+      year: calendarMonth.getFullYear(),
+      monthIndex: calendarMonth.getMonth(),
+      weekStartYmd:
+        calendarScope === "week" ? dateToYmd(calendarWeekStart) : undefined,
+    };
+  }, [calendarScope, calendarMonth, calendarWeekStart]);
+
+  const escalaQueryInputRef = useRef(escalaQueryInput);
+  escalaQueryInputRef.current = escalaQueryInput;
+
   const fetchDashboardData = useCallback(async (): Promise<
     | {
         ok: true;
         pautas: PautaRow[];
         escalas: EscalaRow[];
         usuarios: ModalReporterOption[];
+        session: {
+          userId: string;
+          email: string;
+          nome: string | null;
+          funcao: string | null;
+        };
       }
     | { ok: false; error: string }
   > => {
-    const [pautaResult, escalaResult, repResult] = await Promise.all([
-      listPautasDashboardAction(),
-      listEscalasForDashboardAction(),
-      listReportersForSessionAction(),
-    ]);
-
-    if (!pautaResult.ok) {
+    const res = await loadDashboardAction(escalaQueryInputRef.current);
+    if (!res.ok) {
       return {
         ok: false,
-        error: pautaResult.error || "Não foi possível carregar as pautas.",
+        error: res.error || "Não foi possível carregar o painel.",
       };
     }
-    const escalas: EscalaRow[] = escalaResult.ok
-      ? ((escalaResult.rows ?? []) as unknown as EscalaRow[])
-      : [];
-    const usuarios: ModalReporterOption[] = repResult.ok
-      ? ((repResult.rows ?? []) as ModalReporterOption[])
-      : [];
     return {
       ok: true,
-      pautas: pautaResult.rows as PautaRow[],
-      escalas,
-      usuarios,
+      pautas: res.pautas as PautaRow[],
+      escalas: (res.escalas ?? []) as unknown as EscalaRow[],
+      usuarios: (res.reporters ?? []) as ModalReporterOption[],
+      session: {
+        userId: res.session.userId,
+        email: res.session.email,
+        nome: res.session.nome,
+        funcao: res.session.funcao,
+      },
     };
   }, []);
 
@@ -1375,10 +1402,12 @@ export function PautasDashboard() {
       setPautas([]);
       setEscalas([]);
       setUsuariosFiltro([]);
+      setSessionCtx(null);
     } else {
       setPautas(res.pautas);
       setEscalas(res.escalas);
       setUsuariosFiltro(res.usuarios);
+      setSessionCtx(res.session);
     }
     setLoading(false);
   }, [fetchDashboardData]);
@@ -1396,6 +1425,7 @@ export function PautasDashboard() {
     setPautas(res.pautas);
     setEscalas(res.escalas);
     setUsuariosFiltro(res.usuarios);
+    setSessionCtx(res.session);
   }, [fetchDashboardData]);
 
   useEffect(() => {
@@ -1403,24 +1433,19 @@ export function PautasDashboard() {
   }, [load]);
 
   useEffect(() => {
+    if (skipEscalaRangeReloadRef.current) {
+      skipEscalaRangeReloadRef.current = false;
+      return;
+    }
     let cancelled = false;
-    void getPautaSessionAction().then((r) => {
-      if (cancelled) return;
-      if (r.ok) {
-        setSessionCtx({
-          userId: r.userId,
-          email: r.email,
-          nome: r.nome,
-          funcao: r.funcao,
-        });
-      } else {
-        setSessionCtx(null);
-      }
+    void listEscalasForDashboardAction(escalaQueryInput).then((res) => {
+      if (cancelled || !res.ok) return;
+      setEscalas((res.rows ?? []) as unknown as EscalaRow[]);
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [escalaQueryInput]);
 
   useEffect(() => {
     if (!isModalOpen || !sessionCtx || privilegedSession) return;
