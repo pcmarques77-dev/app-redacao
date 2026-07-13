@@ -1,17 +1,10 @@
 /**
- * Rodar no servidor Linux (cron), no mesmo diretório do repo após `npm ci`:
+ * Opcional: grava agregação RSS em `ronda_rss_snapshot` (ids 1=Gov, 2=Tech).
+ * O Radar em produção lê feeds ao vivo via `/api/ronda-rss` — este script não é necessário no fluxo normal.
  *
  *   export NEXT_PUBLIC_SUPABASE_URL="https://....supabase.co"
  *   export SUPABASE_SERVICE_ROLE_KEY="eyJ..."
  *   npm run ronda:push-snapshot
- *
- * Grava dois registros: id 1 (Ronda Gov) e id 2 (Ronda Tech), na tabela `ronda_rss_snapshot`.
- *
- * Em produção na Vercel, o cron em `vercel.json` chama `/api/cron/ronda-rss-snapshot`
- * (requer `CRON_SECRET`). A leitura do Radar usa snapshot por padrão em produção.
- *
- * Exemplo cron Linux (a cada 10 min):
- *   0,10,20,30,40,50 * * * * cd /opt/app-redacao && . ./.env.ronda && npm run ronda:push-snapshot >> /var/log/ronda-rss.log 2>&1
  */
 import { pushRondaRssSnapshots } from "../src/lib/ronda-rss-push-snapshot-core";
 

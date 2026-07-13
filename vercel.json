@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/cron/ronda-rss-snapshot",
-      "schedule": "0 12 * * *"
-    }
-  ]
-}
