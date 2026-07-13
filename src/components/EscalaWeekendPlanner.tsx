@@ -23,6 +23,7 @@ import {
   getOfficialObservanceForDay,
   type BrFederalObservance,
 } from "@/lib/br-federal-calendar";
+import { getEfemeridesForDay, efemerideEmoji } from "@/lib/br-efemerides";
 import { decemberThroughFirstWeekendNextYearYmds } from "@/lib/escala-planner-spill";
 import {
   PLANNER_DAY_CARD,
@@ -302,6 +303,10 @@ function dayCalendarHints(ymd: string, escalas: EscalaDashboardRow[]): string[] 
         hints.push(label);
       }
     }
+  }
+
+  for (const ef of getEfemeridesForDay(ymd)) {
+    hints.push(`${efemerideEmoji(ef)} ${ef.title} — efeméride`);
   }
 
   return hints;

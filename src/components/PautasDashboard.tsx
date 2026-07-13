@@ -54,6 +54,12 @@ import {
 } from "@/components/StreamyardForm";
 import { PlannerMonthPicker } from "@/components/PlannerMonthPicker";
 import { PautasAppHeader } from "@/components/PautasAppHeader";
+import {
+  efemerideCalendarChipClass,
+  efemerideEmoji,
+  efemerideScopeEmoji,
+  getEfemeridesForDay,
+} from "@/lib/br-efemerides";
 
 type ModalReporterOption = {
   id: string;
@@ -655,7 +661,7 @@ function PautasCalendar({
       }
     }
 
-    // Ordem fixa: Feriado → Plantão → Pautas → Férias; dentro do mesmo tipo, por horário (se houver).
+    // Ordem fixa: Feriado → Plantão → Streamyard → Pautas → Férias.
     return items.sort((a, b) => {
       const tipoDiff =
         CAL_EVENT_ORDER[a.tipo] - CAL_EVENT_ORDER[b.tipo];
@@ -672,6 +678,47 @@ function PautasCalendar({
         "pt-BR"
       );
     });
+  };
+
+  const renderCalendarioDiaEfemerides = (dayKey: string) => {
+    const list = getEfemeridesForDay(dayKey);
+    if (list.length === 0) return null;
+    return (
+      <div className="mt-1 space-y-1">
+        {list.map((ef) => {
+          const scopeEmoji = efemerideScopeEmoji(ef.scope);
+          const scopeLabel =
+            ef.scope === "nacional"
+              ? "Nacional"
+              : ef.scope === "internacional"
+                ? "Internacional"
+                : ef.scope === "regional"
+                  ? "Regional"
+                  : null;
+          return (
+            <div
+              key={ef.id}
+              data-efemeride-calendario
+              title="Efeméride — referência editorial (não editável)"
+              className={efemerideCalendarChipClass(ef.category)}
+            >
+              <span className="line-clamp-2">
+                {efemerideEmoji(ef)} {ef.title}
+                {scopeEmoji && (
+                  <span
+                    className="ml-0.5"
+                    aria-hidden
+                    title={scopeLabel ?? undefined}
+                  >
+                    {scopeEmoji}
+                  </span>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   const renderCalendarioDiaCards = (dayKey: string) => {
@@ -938,6 +985,7 @@ function PautasCalendar({
                     {outside ? calendarOutsideMonthDayLabel(dayKey) : cell.day}
                   </div>
                   {renderCalendarioDiaCards(dayKey)}
+                  {renderCalendarioDiaEfemerides(dayKey)}
                 </div>
               );
             })}
@@ -981,6 +1029,7 @@ function PautasCalendar({
                   {...dayCellHandlers(dayKey)}
                 >
                   {renderCalendarioDiaCards(dayKey)}
+                  {renderCalendarioDiaEfemerides(dayKey)}
                 </div>
               );
             })}
