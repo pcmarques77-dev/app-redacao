@@ -36,6 +36,14 @@ export async function pushRondaRssSnapshots(): Promise<PushRondaRssSnapshotResul
     const payload = await agregarRondaRss(kind);
     const id = RONDA_RSS_SNAPSHOT_ROW[kind];
 
+    if (payload.total === 0) {
+      console.warn(
+        `[ronda-rss-push-snapshot] ${kind}: 0 itens — snapshot anterior mantido.`
+      );
+      totals[kind] = 0;
+      continue;
+    }
+
     const { error } = await supabase.from("ronda_rss_snapshot").upsert(
       {
         id,
