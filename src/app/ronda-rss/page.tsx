@@ -21,6 +21,16 @@ export default function RondaRssPage() {
       apiPath: "/api/ronda-rss?kind=gov",
     },
     {
+      id: "inss",
+      label: "Ronda INSS",
+      apiPath: "/api/ronda-rss?kind=inss",
+    },
+    {
+      id: "longevidade",
+      label: "Ronda Longevidade",
+      apiPath: "/api/ronda-rss?kind=longevidade",
+    },
+    {
       id: "tech",
       label: "Ronda Tech",
       apiPath: "/api/ronda-rss?kind=tech",

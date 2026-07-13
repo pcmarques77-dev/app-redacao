@@ -4,6 +4,8 @@ import type { RondaRssAgregadoOk, RondaRssKind } from "@/lib/ronda-rss-agregado"
 export const RONDA_RSS_SNAPSHOT_ROW: Record<RondaRssKind, number> = {
   gov: 1,
   tech: 2,
+  inss: 3,
+  longevidade: 4,
 };
 
 function parsePayload(raw: unknown): RondaRssAgregadoOk | null {

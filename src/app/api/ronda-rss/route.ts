@@ -8,7 +8,11 @@ const JSON_NO_STORE = {
 } as const;
 
 function kindFromRequest(request: NextRequest): RondaRssKind {
-  return request.nextUrl.searchParams.get("kind") === "tech" ? "tech" : "gov";
+  const kind = request.nextUrl.searchParams.get("kind");
+  if (kind === "tech") return "tech";
+  if (kind === "inss") return "inss";
+  if (kind === "longevidade") return "longevidade";
+  return "gov";
 }
 
 /** Agrega feeds RSS ao vivo a cada requisição (reload, aba ou botão Atualizar). */

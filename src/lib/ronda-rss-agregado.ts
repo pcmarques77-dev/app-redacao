@@ -5,9 +5,11 @@ export type RondaRssFeedConfig = {
   fonte: string;
   rssUrl: string;
   rssFallbackUrls?: string[];
+  /** Google Notícias: exibe o veículo após " - " no título em vez de `fonte`. */
+  fonteDoTituloGoogleNews?: boolean;
 };
 
-export type RondaRssKind = "gov" | "tech";
+export type RondaRssKind = "gov" | "tech" | "inss" | "longevidade";
 
 export const RONDA_RSS_FEEDS_GOV: RondaRssFeedConfig[] = [
   {
@@ -43,6 +45,60 @@ export const RONDA_RSS_FEEDS_GOV: RondaRssFeedConfig[] = [
 export const RONDA_RSS_FEEDS = RONDA_RSS_FEEDS_GOV;
 
 /** Feed principal do TudoCelular (`/rss.xml` 404); usa o XML do site. */
+export const RONDA_RSS_FEEDS_INSS: RondaRssFeedConfig[] = [
+  {
+    rssUrl:
+      "https://news.google.com/rss/search?q=INSS&hl=pt-BR&gl=BR&ceid=BR:pt-419",
+    fonte: "Google Notícias — INSS",
+    fonteDoTituloGoogleNews: true,
+  },
+  {
+    rssUrl:
+      "https://news.google.com/rss/search?q=previd%C3%AAncia%20social&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
+    fonte: "Google Notícias — Previdência Social",
+    fonteDoTituloGoogleNews: true,
+  },
+  {
+    rssUrl:
+      "https://news.google.com/rss/search?q=aposentadoria&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
+    fonte: "Google Notícias — Aposentadoria",
+    fonteDoTituloGoogleNews: true,
+  },
+  {
+    rssUrl:
+      "https://news.google.com/rss/search?q=aposentados&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
+    fonte: "Google Notícias — Aposentados",
+    fonteDoTituloGoogleNews: true,
+  },
+];
+
+export const RONDA_RSS_FEEDS_LONGEVIDADE: RondaRssFeedConfig[] = [
+  {
+    rssUrl:
+      "https://news.google.com/rss/search?q=longevidade&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
+    fonte: "Google Notícias — Longevidade",
+    fonteDoTituloGoogleNews: true,
+  },
+  {
+    rssUrl:
+      "https://news.google.com/rss/search?q=saude%20terceira%20idade&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
+    fonte: "Google Notícias — Saúde Terceira Idade",
+    fonteDoTituloGoogleNews: true,
+  },
+  {
+    rssUrl:
+      "https://news.google.com/rss/search?q=terceira%20idade&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
+    fonte: "Google Notícias — Terceira Idade",
+    fonteDoTituloGoogleNews: true,
+  },
+  {
+    rssUrl:
+      "https://news.google.com/rss/search?q=velhice&hl=pt-BR&gl=BR&ceid=BR%3Apt-419",
+    fonte: "Google Notícias — Velhice",
+    fonteDoTituloGoogleNews: true,
+  },
+];
+
 export const RONDA_RSS_FEEDS_TECH: RondaRssFeedConfig[] = [
   {
     rssUrl: "https://www.tudocelular.com/feed/",
@@ -81,6 +137,8 @@ export const RONDA_RSS_FEEDS_TECH: RondaRssFeedConfig[] = [
 const FEEDS_POR_KIND: Record<RondaRssKind, RondaRssFeedConfig[]> = {
   gov: RONDA_RSS_FEEDS_GOV,
   tech: RONDA_RSS_FEEDS_TECH,
+  inss: RONDA_RSS_FEEDS_INSS,
+  longevidade: RONDA_RSS_FEEDS_LONGEVIDADE,
 };
 
 const ITENS_POR_FONTE = 10;
@@ -101,6 +159,37 @@ function absolutizarUrl(baseUrl: string, href: string): string | null {
   } catch {
     return null;
   }
+}
+
+function fonteGoogleNewsDoTitulo(titulo: string, fallback: string): string {
+  const idx = titulo.lastIndexOf(" - ");
+  if (idx === -1) return fallback;
+  const veiculo = titulo.slice(idx + 3).trim();
+  return veiculo || fallback;
+}
+
+function normalizarTituloDedup(titulo: string): string {
+  return titulo
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+/** Remove repetidas entre feeds (mesmo link ou mesmo título); mantém a mais recente. */
+function deduplicarPorLinkETitulo(itens: ItemRonda[]): ItemRonda[] {
+  const vistosLink = new Set<string>();
+  const vistosTitulo = new Set<string>();
+  const out: ItemRonda[] = [];
+  for (const it of itens) {
+    const tituloKey = normalizarTituloDedup(it.titulo);
+    if (vistosLink.has(it.link) || vistosTitulo.has(tituloKey)) continue;
+    vistosLink.add(it.link);
+    vistosTitulo.add(tituloKey);
+    out.push(it);
+  }
+  return out;
 }
 
 function criarSequenciaPuxada() {
@@ -129,7 +218,8 @@ async function extrairItensRss(
   fonte: string,
   baseUrl: string,
   nextPuxada: () => { ordem: number; data_publicacao: string },
-  maxItens: number = ITENS_POR_FONTE
+  maxItens: number = ITENS_POR_FONTE,
+  fonteDoTituloGoogleNews = false
 ): Promise<ItemRonda[]> {
   const trimmed = xml.trim();
   if (!trimmed || !trimmed.startsWith("<")) {
@@ -175,7 +265,9 @@ async function extrairItensRss(
     out.push({
       titulo,
       link: abs,
-      fonte,
+      fonte: fonteDoTituloGoogleNews
+        ? fonteGoogleNewsDoTitulo(titulo, fonte)
+        : fonte,
       data_publicacao,
       publicado_em: publicadoEm,
       ordem,
@@ -242,7 +334,8 @@ async function coletarItensUmaFonte(
       config.fonte,
       baseUrl,
       nextPuxada,
-      ITENS_POR_FONTE
+      ITENS_POR_FONTE,
+      config.fonteDoTituloGoogleNews
     );
     for (const it of itens) {
       if (vistos.has(it.link)) continue;
@@ -279,8 +372,9 @@ export async function agregarRondaRss(
   const todasNoticias = porFonte.flat();
 
   todasNoticias.sort(ordenarComoRonda);
+  const unicas = deduplicarPorLinkETitulo(todasNoticias);
 
-  const noticias = todasNoticias.map(
+  const noticias = unicas.map(
     ({ titulo, link, fonte, data_publicacao, publicado_em }) => ({
       titulo,
       link,

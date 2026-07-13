@@ -1,5 +1,5 @@
 /**
- * Opcional: grava agregação RSS em `ronda_rss_snapshot` (ids 1=Gov, 2=Tech).
+ * Opcional: grava agregação RSS em `ronda_rss_snapshot` (ids 1=Gov, 2=Tech, 3=INSS, 4=Longevidade).
  * O Radar em produção lê feeds ao vivo via `/api/ronda-rss` — este script não é necessário no fluxo normal.
  *
  *   export NEXT_PUBLIC_SUPABASE_URL="https://....supabase.co"
