@@ -91,7 +91,7 @@ export async function loadDashboardAction(
 
   const [pautasResult, escalasResult, reportersResult] = await Promise.all([
     pautasQuery,
-    queryEscalasOverlappingRange(admin, rangeStart, rangeEnd),
+    queryEscalasOverlappingRange(admin, rangeStart, rangeEnd, actor.userId),
     privileged
       ? admin.from("usuarios").select("id, nome").order("nome", { ascending: true })
       : Promise.resolve({ data: [], error: null }),

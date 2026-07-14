@@ -4,6 +4,10 @@ export const ESCALA_TIPO_FERIADO = "Feriado";
 export const ESCALA_TIPO_PLANTAO = "Plantão";
 export const ESCALA_TIPO_FERIAS = "Férias";
 export const ESCALA_TIPO_STREAMYARD = "Streamyard";
+export const ESCALA_TIPO_NOTAS = "Notas";
+
+/** Texto da nota pessoal (campo `coordenador` na tabela `escalas`). */
+export const NOTA_TEXTO_MAX_LENGTH = 2000;
 
 export function normalizeEscalaTipoKey(t: string | null | undefined): string {
   return (t ?? "")
@@ -15,6 +19,20 @@ export function normalizeEscalaTipoKey(t: string | null | undefined): string {
 
 export function isStreamyardTipo(t: string | null | undefined): boolean {
   return normalizeEscalaTipoKey(t) === "streamyard";
+}
+
+export function isNotasTipo(t: string | null | undefined): boolean {
+  return normalizeEscalaTipoKey(t) === "notas";
+}
+
+/** Normaliza o texto da nota pessoal para persistência. */
+export function normalizeNotaTexto(
+  texto: string | null | undefined
+): string | null {
+  const t = (texto ?? "").trim();
+  if (!t) return null;
+  if (t.length > NOTA_TEXTO_MAX_LENGTH) return null;
+  return t;
 }
 
 /** Normaliza horário salvo (ex.: `8h`, `08:30`) para `HH:MM` usado em `<input type="time">`. */

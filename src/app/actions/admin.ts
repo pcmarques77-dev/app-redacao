@@ -67,15 +67,38 @@ export async function getAdminActor(): Promise<AdminActor> {
     return { ok: false, error: error.message };
   }
 
-  const funcaoRaw = row?.funcao?.trim() ?? null;
   const isSuperAdmin = isSuperAdminEmail(email);
+
+  // Super admin pode existir só no Auth; garante linha em `usuarios` para FKs (ex.: notas).
+  let profile = row;
+  if (!profile && isSuperAdmin) {
+    const nomeMeta =
+      typeof user.user_metadata?.nome === "string"
+        ? user.user_metadata.nome.trim()
+        : "";
+    const { error: upsertErr } = await admin.from("usuarios").upsert(
+      {
+        id: user.id,
+        nome: nomeMeta || "Editor",
+        email,
+        funcao: "Editor",
+      },
+      { onConflict: "id" }
+    );
+    if (upsertErr) {
+      return { ok: false, error: upsertErr.message };
+    }
+    profile = { funcao: "Editor", nome: nomeMeta || "Editor" };
+  }
+
+  const funcaoRaw = profile?.funcao?.trim() ?? null;
   const isEditor = isEditorRole(funcaoRaw);
 
   return {
     ok: true,
     userId: user.id,
     email,
-    nome: (row?.nome ?? "").trim() || null,
+    nome: (profile?.nome ?? "").trim() || null,
     funcao: funcaoRaw,
     isSuperAdmin,
     isEditor,

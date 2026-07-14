@@ -4,15 +4,20 @@ import { revalidatePath } from "next/cache";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getAdminActor } from "@/app/actions/admin";
 import {
+  canManageNotaPessoal,
   canManageStreamyardEntry,
   isEditorRole,
   isSuperAdminEmail,
 } from "@/lib/admin-acl";
 import {
+  ESCALA_TIPO_NOTAS,
   ESCALA_TIPO_PLANTAO,
   ESCALA_TIPO_STREAMYARD,
+  isNotasTipo,
   isStreamyardTipo,
+  normalizeNotaTexto,
   normalizeStreamyardHorario,
+  NOTA_TEXTO_MAX_LENGTH,
 } from "@/lib/escala-constants";
 import {
   dashboardEscalaQueryRange,
@@ -26,6 +31,9 @@ const ESCALA_ACCESS_DENIED =
 
 const STREAMYARD_ACCESS_DENIED =
   "Você não pode gerenciar esta marcação Streamyard.";
+
+const NOTA_ACCESS_DENIED =
+  "Você não pode gerenciar esta nota. Notas são privadas.";
 
 function getServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -59,11 +67,27 @@ const ESCALA_DASHBOARD_SELECT = `
         usuarios ( nome )
       `;
 
-/** Escalas que intersectam um intervalo de datas (plantões, férias, feriados, Streamyard). */
+/**
+ * Remove notas de outros usuários antes de enviar ao cliente.
+ * Notas são privadas: só o dono as recebe (nem Editor/super admin).
+ */
+function filterNotasForViewer(
+  rows: EscalaDashboardRow[],
+  viewerUserId: string
+): EscalaDashboardRow[] {
+  const uid = viewerUserId.trim();
+  return rows.filter((row) => {
+    if (!isNotasTipo(row.tipo)) return true;
+    return (row.usuario_id ?? "").trim() === uid;
+  });
+}
+
+/** Escalas que intersectam um intervalo de datas (plantões, férias, feriados, Streamyard, Notas próprias). */
 export async function queryEscalasOverlappingRange(
   admin: SupabaseClient,
   rangeStart: string,
-  rangeEnd: string
+  rangeEnd: string,
+  viewerUserId: string
 ): Promise<
   | { ok: true; rows: EscalaDashboardRow[] }
   | { ok: false; error: string }
@@ -95,8 +119,11 @@ export async function queryEscalasOverlappingRange(
   ingest(inRange);
   ingest(crossesIn);
 
-  const rows = [...map.values()].sort((a, b) =>
-    (a.data_inicio ?? "").localeCompare(b.data_inicio ?? "")
+  const rows = filterNotasForViewer(
+    [...map.values()].sort((a, b) =>
+      (a.data_inicio ?? "").localeCompare(b.data_inicio ?? "")
+    ),
+    viewerUserId
   );
 
   return { ok: true, rows };
@@ -130,7 +157,7 @@ export async function listEscalasForDashboardAction(
   }
 
   const { rangeStart, rangeEnd } = dashboardEscalaQueryRange(input);
-  return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd);
+  return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd, user.id);
 }
 
 async function assertCanManageEscala(
@@ -187,8 +214,15 @@ export async function listEscalasOverlappingMonthPlannerAction(
     };
   }
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.id) {
+    return { ok: false, error: "Sessão inválida. Faça login novamente." };
+  }
+
   const { rangeStart, rangeEnd } = plannerQueryRangeYm(year, monthIndex);
-  return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd);
+  return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd, user.id);
 }
 
 /** Adiciona um plantão na data. Permite vários por dia; evita repetir o mesmo jornalista no mesmo dia. */
@@ -372,6 +406,29 @@ export async function deleteEscala(
   const gate = await assertCanManageEscala(supabase);
   if (!gate.ok) return gate;
 
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: existing, error: fetchErr } = await admin
+    .from("escalas")
+    .select("id, tipo")
+    .eq("id", trimmed)
+    .maybeSingle();
+
+  if (fetchErr) return { ok: false, error: fetchErr.message };
+  if (!existing) {
+    return { ok: false, error: "Entrada de escala não encontrada." };
+  }
+  if (isNotasTipo(existing.tipo)) {
+    return { ok: false, error: NOTA_ACCESS_DENIED };
+  }
+
   const { error } = await supabase.from("escalas").delete().eq("id", trimmed);
   if (error) {
     return { ok: false, error: error.message };
@@ -391,8 +448,30 @@ export async function saveEscalaAction(
   const gate = await assertCanManageEscala(supabase);
   if (!gate.ok) return gate;
 
+  if (isNotasTipo(typeof row.tipo === "string" ? row.tipo : null)) {
+    return { ok: false, error: NOTA_ACCESS_DENIED };
+  }
+
   const id = editingId?.trim();
   if (id) {
+    const admin = getServiceClient();
+    if (!admin) {
+      return {
+        ok: false,
+        error:
+          "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+      };
+    }
+    const { data: existing, error: fetchErr } = await admin
+      .from("escalas")
+      .select("id, tipo")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr) return { ok: false, error: fetchErr.message };
+    if (existing && isNotasTipo(existing.tipo)) {
+      return { ok: false, error: NOTA_ACCESS_DENIED };
+    }
+
     const { error } = await supabase.from("escalas").update(row).eq("id", id);
     if (error) return { ok: false, error: error.message };
   } else {
@@ -649,5 +728,214 @@ export async function moveStreamyardToDateAction(
 
   revalidatePath("/");
   revalidatePath("/escala");
+  return { ok: true };
+}
+
+function assertCanManageNotaOwner(
+  actor: { userId: string },
+  entryUsuarioId: string
+): { ok: true } | { ok: false; error: string } {
+  if (
+    !canManageNotaPessoal({
+      currentUserId: actor.userId,
+      entryUsuarioId,
+    })
+  ) {
+    return { ok: false, error: NOTA_ACCESS_DENIED };
+  }
+  return { ok: true };
+}
+
+/** Cria ou atualiza uma nota pessoal (privada — somente o dono). */
+export async function saveNotaAction(
+  editingId: string | null | undefined,
+  row: {
+    data_inicio: string;
+    texto: string;
+  }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const dataInicio = row.data_inicio?.trim() ?? "";
+  const textoNorm = normalizeNotaTexto(row.texto);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataInicio)) {
+    return { ok: false, error: "Data inválida." };
+  }
+  if (!textoNorm) {
+    const rawLen = (row.texto ?? "").trim().length;
+    if (rawLen > NOTA_TEXTO_MAX_LENGTH) {
+      return {
+        ok: false,
+        error: `A nota pode ter no máximo ${NOTA_TEXTO_MAX_LENGTH} caracteres.`,
+      };
+    }
+    return { ok: false, error: "Escreva o texto da nota." };
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: profile, error: profileErr } = await admin
+    .from("usuarios")
+    .select("id")
+    .eq("id", actor.userId)
+    .maybeSingle();
+  if (profileErr) return { ok: false, error: profileErr.message };
+  if (!profile) {
+    return {
+      ok: false,
+      error:
+        "Seu perfil não está cadastrado em usuários. Procure a chefia da redação.",
+    };
+  }
+
+  const id = editingId?.trim();
+  if (id) {
+    const { data: existing, error: fetchErr } = await admin
+      .from("escalas")
+      .select("id, tipo, usuario_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr) return { ok: false, error: fetchErr.message };
+    if (!existing || !isNotasTipo(existing.tipo)) {
+      return { ok: false, error: "Nota não encontrada." };
+    }
+
+    const editPerm = assertCanManageNotaOwner(
+      actor,
+      existing.usuario_id?.trim() ?? ""
+    );
+    if (!editPerm.ok) return editPerm;
+  }
+
+  const payload = {
+    tipo: ESCALA_TIPO_NOTAS,
+    usuario_id: actor.userId,
+    data_inicio: dataInicio,
+    data_fim: null,
+    coordenador: textoNorm,
+    horario: null,
+  };
+
+  if (id) {
+    const { error } = await admin.from("escalas").update(payload).eq("id", id);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    const { error } = await admin.from("escalas").insert(payload);
+    if (error) return { ok: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  return { ok: true };
+}
+
+export async function deleteNotaAction(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmed = id?.trim();
+  if (!trimmed) {
+    return { ok: false, error: "ID inválido." };
+  }
+
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: existing, error: fetchErr } = await admin
+    .from("escalas")
+    .select("id, tipo, usuario_id")
+    .eq("id", trimmed)
+    .maybeSingle();
+
+  if (fetchErr) return { ok: false, error: fetchErr.message };
+  if (!existing || !isNotasTipo(existing.tipo)) {
+    return { ok: false, error: "Nota não encontrada." };
+  }
+
+  const perm = assertCanManageNotaOwner(
+    actor,
+    existing.usuario_id?.trim() ?? ""
+  );
+  if (!perm.ok) return perm;
+
+  const { error } = await admin.from("escalas").delete().eq("id", trimmed);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/");
+  return { ok: true };
+}
+
+/** Move uma nota pessoal para outro dia (arrastar no calendário). */
+export async function moveNotaToDateAction(
+  escalaId: string,
+  targetDateYmd: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const id = escalaId?.trim();
+  const target = targetDateYmd?.trim();
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+    return { ok: false, error: "Dados inválidos." };
+  }
+
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: row, error: fetchErr } = await admin
+    .from("escalas")
+    .select("id, tipo, usuario_id, data_inicio")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (fetchErr) return { ok: false, error: fetchErr.message };
+  if (!row || !isNotasTipo(row.tipo)) {
+    return { ok: false, error: "Nota não encontrada." };
+  }
+
+  const uid = row.usuario_id?.trim();
+  const fromDate = row.data_inicio?.trim();
+  if (!uid || !fromDate) {
+    return { ok: false, error: "Nota inválida." };
+  }
+
+  const perm = assertCanManageNotaOwner(actor, uid);
+  if (!perm.ok) return perm;
+
+  if (fromDate === target) {
+    return { ok: true };
+  }
+
+  const { error: updErr } = await admin
+    .from("escalas")
+    .update({ data_inicio: target })
+    .eq("id", id);
+
+  if (updErr) return { ok: false, error: updErr.message };
+
+  revalidatePath("/");
   return { ok: true };
 }

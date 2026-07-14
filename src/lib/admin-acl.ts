@@ -35,6 +35,18 @@ export function canManageStreamyardEntry(args: {
   return uid !== "" && uid === args.currentUserId;
 }
 
+/**
+ * Nota pessoal: somente o próprio dono — nem Editor nem super admin.
+ * A privacidade depende também de filtrar essas linhas nas queries do servidor.
+ */
+export function canManageNotaPessoal(args: {
+  currentUserId: string;
+  entryUsuarioId: string | null;
+}): boolean {
+  const uid = (args.entryUsuarioId ?? "").trim();
+  return uid !== "" && uid === args.currentUserId;
+}
+
 /** Quem pode editar ou excluir uma pauta no painel (super admin, Editor ou autor). */
 export function canUserEditOrDeletePauta(args: {
   currentUserId: string;
