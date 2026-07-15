@@ -22,6 +22,23 @@ export function canManageEscala(args: {
   return isSuperAdminEmail(args.email) || isEditorRole(args.funcao);
 }
 
+/**
+ * Preferir flags do servidor (`getAdminActor` / `loadDashboardAction`).
+ * Evita falso negativo quando o cliente não lê `usuarios.funcao` (RLS).
+ */
+export function hasPrivilegedEditorAccess(args: {
+  isSuperAdmin?: boolean;
+  isEditor?: boolean;
+  email?: string | null | undefined;
+  funcao?: string | null | undefined;
+}): boolean {
+  if (args.isSuperAdmin || args.isEditor) return true;
+  return canManageEscala({
+    email: args.email ?? null,
+    funcao: args.funcao ?? null,
+  });
+}
+
 /** Super admin, Editor ou o próprio jornalista: gerenciar marcação Streamyard. */
 export function canManageStreamyardEntry(args: {
   currentUserId: string;

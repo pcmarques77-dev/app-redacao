@@ -14,16 +14,16 @@ import {
   type ReactNode,
 } from "react";
 import {
+  hasPrivilegedEditorAccess,
   canManageNotaPessoal,
   canManageStreamyardEntry,
   canUserEditOrDeletePauta,
-  isEditorRole,
-  isSuperAdminEmail,
 } from "@/lib/admin-acl";
-import { isNotasTipo, isStreamyardTipo } from "@/lib/escala-constants";
+import { isAgendaTipo, isNotasTipo, isStreamyardTipo } from "@/lib/escala-constants";
 import { loadDashboardAction } from "@/app/actions/dashboard";
 import {
   listEscalasForDashboardAction,
+  moveAgendaToDateAction,
   moveNotaToDateAction,
   moveStreamyardToDateAction,
 } from "@/app/actions/escalas";
@@ -54,6 +54,10 @@ import {
   NotasForm,
   type NotasInitialValues,
 } from "@/components/NotasForm";
+import {
+  AgendaForm,
+  type AgendaInitialValues,
+} from "@/components/AgendaForm";
 import {
   StreamyardForm,
   type StreamyardInitialValues,
@@ -104,6 +108,14 @@ type EscalaRow = {
 
 function escalaUsuarioNome(e: EscalaRow): string {
   return e.usuarios?.nome?.trim() || "—";
+}
+
+function agendaTitulo(e: EscalaRow): string {
+  return e.coordenador?.trim() || "Sem título";
+}
+
+function agendaEditoria(e: EscalaRow): string {
+  return e.horario?.trim() || "—";
 }
 
 function normalizeEscalaTipo(t: string | null): string {
@@ -439,6 +451,7 @@ function PautasCalendar({
   onDropDeadline,
   onDropStreamyard,
   onDropNota,
+  onDropAgenda,
   controlsContent,
   onDayClick,
   onEscalaCardClick,
@@ -447,6 +460,7 @@ function PautasCalendar({
   canManageDeadlineForPauta,
   canDragStreamyard,
   canDragNota,
+  canDragAgenda,
 }: {
   scope: "month" | "week";
   monthAnchor: Date;
@@ -467,6 +481,10 @@ function PautasCalendar({
     escalaId: string,
     targetDayYmd: string
   ) => void | Promise<void>;
+  onDropAgenda?: (
+    escalaId: string,
+    targetDayYmd: string
+  ) => void | Promise<void>;
   controlsContent?: ReactNode;
   onDayClick?: (dayYmd: string) => void;
   onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
@@ -475,6 +493,7 @@ function PautasCalendar({
   canManageDeadlineForPauta?: (p: PautaRow) => boolean;
   canDragStreamyard?: (e: EscalaRow) => boolean;
   canDragNota?: (e: EscalaRow) => boolean;
+  canDragAgenda?: (e: EscalaRow) => boolean;
 }) {
   const year = monthAnchor.getFullYear();
   const month = monthAnchor.getMonth();
@@ -586,9 +605,14 @@ function PautasCalendar({
       const notaId = e.dataTransfer.getData("notaEscalaId");
       if (notaId?.trim()) {
         void onDropNota?.(notaId.trim(), dayKey);
+        return;
+      }
+      const agendaId = e.dataTransfer.getData("agendaEscalaId");
+      if (agendaId?.trim()) {
+        void onDropAgenda?.(agendaId.trim(), dayKey);
       }
     },
-    [onDropDeadline, onDropStreamyard, onDropNota]
+    [onDropDeadline, onDropStreamyard, onDropNota, onDropAgenda]
   );
 
   const handleDragStartCard = useCallback((e: DragEvent<HTMLButtonElement>) => {
@@ -621,6 +645,17 @@ function PautasCalendar({
     []
   );
 
+  const handleDragStartAgendaCard = useCallback(
+    (e: DragEvent<HTMLButtonElement>) => {
+      const id = e.currentTarget.dataset.agendaEscalaId;
+      if (id) {
+        e.dataTransfer.setData("agendaEscalaId", id);
+        e.dataTransfer.effectAllowed = "move";
+      }
+    },
+    []
+  );
+
   const handleDragEndCard = useCallback(() => {
     setDropHighlightKey(null);
   }, []);
@@ -629,6 +664,7 @@ function PautasCalendar({
     | { tipo: "feriado"; escala: EscalaRow }
     | { tipo: "plantao"; escala: EscalaRow }
     | { tipo: "streamyard"; escala: EscalaRow }
+    | { tipo: "agenda"; escala: EscalaRow }
     | { tipo: "nota"; escala: EscalaRow }
     | { tipo: "pauta"; pauta: PautaRow }
     | { tipo: "ferias"; escala: EscalaRow };
@@ -637,9 +673,10 @@ function PautasCalendar({
     feriado: 1,
     plantao: 2,
     streamyard: 3,
-    nota: 4,
-    pauta: 5,
-    ferias: 6,
+    agenda: 4,
+    nota: 5,
+    pauta: 6,
+    ferias: 7,
   };
 
   const calendarioDiaItemMinutes = (item: CalendarioDiaItem): number | null => {
@@ -680,6 +717,12 @@ function PautasCalendar({
     }
 
     for (const e of escalas) {
+      if (isAgendaTipo(e.tipo) && e.data_inicio?.trim() === dayKey) {
+        items.push({ tipo: "agenda", escala: e });
+      }
+    }
+
+    for (const e of escalas) {
       if (isNotasTipo(e.tipo) && e.data_inicio?.trim() === dayKey) {
         items.push({ tipo: "nota", escala: e });
       }
@@ -698,7 +741,7 @@ function PautasCalendar({
       }
     }
 
-    // Ordem fixa: Feriado → Plantão → Streamyard → Notas → Pautas → Férias.
+    // Ordem fixa: Feriado → Plantão → Streamyard → Agenda → Notas → Pautas → Férias.
     return items.sort((a, b) => {
       const tipoDiff =
         CAL_EVENT_ORDER[a.tipo] - CAL_EVENT_ORDER[b.tipo];
@@ -875,6 +918,32 @@ function PautasCalendar({
               >
                 <span className="block font-semibold">Nota</span>
                 <span className="line-clamp-2 block font-medium">{preview}</span>
+              </button>
+            );
+          }
+
+          if (item.tipo === "agenda") {
+            const e = item.escala;
+            const canDrag = canDragAgenda?.(e) ?? false;
+            return (
+              <button
+                key={key}
+                type="button"
+                data-agenda-escala-id={e.id}
+                draggable={canDrag}
+                onDragStart={canDrag ? handleDragStartAgendaCard : undefined}
+                onDragEnd={canDrag ? handleDragEndCard : undefined}
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onEscalaCardClick?.(e, dayKey);
+                }}
+                className={`block w-full rounded border border-orange-300 bg-orange-100 px-1.5 py-1 text-left text-[11px] font-medium leading-snug text-orange-900 shadow-sm transition hover:bg-orange-200/80 hover:ring-2 hover:ring-orange-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-orange-500 ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+              >
+                <span className="block font-semibold">Agenda</span>
+                <span className="line-clamp-2">{agendaTitulo(e)}</span>
+                <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
+                  {agendaEditoria(e)}
+                </span>
               </button>
             );
           }
@@ -1216,6 +1285,8 @@ export function PautasDashboard() {
     email: string;
     nome: string | null;
     funcao: string | null;
+    isSuperAdmin: boolean;
+    isEditor: boolean;
   } | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const [viewMode, setViewMode] = useState<"lista" | "calendario">(() => {
@@ -1293,7 +1364,7 @@ export function PautasDashboard() {
   const [pautaCalendarioSomenteLeitura, setPautaCalendarioSomenteLeitura] =
     useState<PautaRow | null>(null);
   const [modalTab, setModalTab] = useState<
-    "pauta" | "streamyard" | "notas" | "escala"
+    "pauta" | "streamyard" | "notas" | "agenda" | "escala"
   >("pauta");
   const [escalaFormDirty, setEscalaFormDirty] = useState(false);
   const [escalaSaving, setEscalaSaving] = useState(false);
@@ -1303,6 +1374,7 @@ export function PautasDashboard() {
     if (!editingEscala?.usuario_id?.trim()) return undefined;
     if (isStreamyardTipo(editingEscala.tipo)) return undefined;
     if (isNotasTipo(editingEscala.tipo)) return undefined;
+    if (isAgendaTipo(editingEscala.tipo)) return undefined;
     return {
       id: editingEscala.id,
       tipo: editingEscala.tipo,
@@ -1332,6 +1404,16 @@ export function PautasDashboard() {
     return {
       id: editingEscala.id,
       texto: editingEscala.coordenador,
+    };
+  }, [editingEscala]);
+
+  const agendaFormInitial = useMemo((): AgendaInitialValues | undefined => {
+    if (!editingEscala?.id) return undefined;
+    if (!isAgendaTipo(editingEscala.tipo)) return undefined;
+    return {
+      id: editingEscala.id,
+      titulo: editingEscala.coordenador,
+      editoria: editingEscala.horario,
     };
   }, [editingEscala]);
 
@@ -1408,6 +1490,21 @@ export function PautasDashboard() {
     [sessionCtx]
   );
 
+  const canDragAgenda = useCallback(
+    (e: EscalaRow) => Boolean(sessionCtx && isAgendaTipo(e.tipo)),
+    [sessionCtx]
+  );
+
+  const opcoesEditoriasAgenda = useMemo(() => {
+    const set = new Set<string>(EDITORIA_OPTIONS);
+    for (const e of escalas) {
+      if (!isAgendaTipo(e.tipo)) continue;
+      const ed = e.horario?.trim();
+      if (ed) set.add(ed);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [escalas]);
+
   const handleCalendarioPautaChipClick = useCallback(
     (p: PautaRow) => {
       if (!sessionCtx || canManagePauta(p)) {
@@ -1422,8 +1519,12 @@ export function PautasDashboard() {
   const privilegedSession = useMemo(
     () =>
       sessionCtx
-        ? isSuperAdminEmail(sessionCtx.email) ||
-          isEditorRole(sessionCtx.funcao)
+        ? hasPrivilegedEditorAccess({
+            isSuperAdmin: sessionCtx.isSuperAdmin,
+            isEditor: sessionCtx.isEditor,
+            email: sessionCtx.email,
+            funcao: sessionCtx.funcao,
+          })
         : false,
     [sessionCtx]
   );
@@ -1519,6 +1620,8 @@ export function PautasDashboard() {
           email: string;
           nome: string | null;
           funcao: string | null;
+          isSuperAdmin: boolean;
+          isEditor: boolean;
         };
       }
     | { ok: false; error: string }
@@ -1540,6 +1643,8 @@ export function PautasDashboard() {
         email: res.session.email,
         nome: res.session.nome,
         funcao: res.session.funcao,
+        isSuperAdmin: res.session.isSuperAdmin,
+        isEditor: res.session.isEditor,
       },
     };
   }, []);
@@ -1899,6 +2004,34 @@ export function PautasDashboard() {
     [escalas]
   );
 
+  const handleCalendarAgendaDrop = useCallback(
+    async (escalaId: string, targetYmd: string) => {
+      setFeedbackErro(null);
+      const row = escalas.find((e) => e.id === escalaId);
+      if (!row || !isAgendaTipo(row.tipo)) return;
+      const previousDate = row.data_inicio;
+      if (previousDate?.trim() === targetYmd) return;
+
+      setEscalas((rows) =>
+        rows.map((e) =>
+          e.id === escalaId ? { ...e, data_inicio: targetYmd } : e
+        )
+      );
+
+      const res = await moveAgendaToDateAction(escalaId, targetYmd);
+
+      if (!res.ok) {
+        setEscalas((rows) =>
+          rows.map((e) =>
+            e.id === escalaId ? { ...e, data_inicio: previousDate } : e
+          )
+        );
+        setFeedbackErro(res.error);
+      }
+    },
+    [escalas]
+  );
+
   const closeNovaPautaModal = useCallback(() => {
     setIsModalOpen(false);
     setSelectedDate(null);
@@ -2034,6 +2167,24 @@ export function PautasDashboard() {
         setModalError(null);
         setModalReportersError(null);
         setModalTab("notas");
+        setEscalaFormDirty(false);
+        setEscalaSaving(false);
+        setIsModalOpen(true);
+        return;
+      }
+
+      if (isAgendaTipo(row.tipo)) {
+        if (!sessionCtx) return;
+        setSelectedDate(dayYmd);
+        setEditingEscala(row);
+        setModalTitulo("");
+        setModalResumo("");
+        setModalReporterId("");
+        setModalEditoria("Últimas Notícias");
+        setModalStatus("Sugerida");
+        setModalError(null);
+        setModalReportersError(null);
+        setModalTab("agenda");
         setEscalaFormDirty(false);
         setEscalaSaving(false);
         setIsModalOpen(true);
@@ -2572,6 +2723,7 @@ export function PautasDashboard() {
               onDropDeadline={handleCalendarDeadlineDrop}
               onDropStreamyard={handleCalendarStreamyardDrop}
               onDropNota={handleCalendarNotaDrop}
+              onDropAgenda={handleCalendarAgendaDrop}
               controlsContent={controlsLinha}
               onDayClick={handleCalendarDayClick}
               onEscalaCardClick={handleEscalaCardClick}
@@ -2580,6 +2732,7 @@ export function PautasDashboard() {
               canManageDeadlineForPauta={canManagePauta}
               canDragStreamyard={canDragStreamyard}
               canDragNota={canDragNota}
+              canDragAgenda={canDragAgenda}
             />
           )}
             </>
@@ -2658,6 +2811,20 @@ export function PautasDashboard() {
                 }`}
               >
                 Streamyard
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={modalTab === "agenda"}
+                onClick={() => setModalTab("agenda")}
+                disabled={modalSaving || escalaSaving}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                  modalTab === "agenda"
+                    ? "border-blue-600 font-semibold text-slate-900"
+                    : "border-transparent font-medium text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Agenda
               </button>
               <button
                 type="button"
@@ -2903,6 +3070,42 @@ export function PautasDashboard() {
                   canPickUsuario={privilegedSession}
                   currentUserId={sessionCtx?.userId ?? ""}
                   idPrefix="modal-streamyard"
+                  onSuccess={() => {
+                    closeNovaPautaModal();
+                    void refreshDashboardData();
+                  }}
+                  onDirtyChange={setEscalaFormDirty}
+                  onSavingChange={setEscalaSaving}
+                />
+              </div>
+            )}
+
+            {modalTab === "agenda" && selectedDate && (
+              <div className="mt-4" role="tabpanel">
+                <p className="mb-3 text-sm text-slate-600">
+                  Data:{" "}
+                  <span className="font-medium text-slate-800">
+                    {formatDeadlinePtBR(selectedDate)}
+                  </span>
+                  {editingEscala && isAgendaTipo(editingEscala.tipo) ? (
+                    <>
+                      {" "}
+                      — editando evento existente. Use{" "}
+                      <span className="font-medium">Excluir</span> no rodapé
+                      para remover.
+                    </>
+                  ) : null}
+                </p>
+                <AgendaForm
+                  key={
+                    editingEscala && isAgendaTipo(editingEscala.tipo)
+                      ? `modal-agenda-edit-${editingEscala.id}`
+                      : `modal-agenda-new-${selectedDate}`
+                  }
+                  defaultDateYmd={selectedDate}
+                  initialAgenda={agendaFormInitial}
+                  editoriaOptions={opcoesEditoriasAgenda}
+                  idPrefix="modal-agenda"
                   onSuccess={() => {
                     closeNovaPautaModal();
                     void refreshDashboardData();

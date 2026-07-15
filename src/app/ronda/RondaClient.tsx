@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { canManageEscala } from "@/lib/admin-acl";
+import { getSessionPrivilegesAction } from "@/app/actions/admin";
 import { PautasAppHeader } from "@/components/PautasAppHeader";
-import { createBrowserClient } from "@/lib/supabase/client";
 import { FonteLogo } from "./FonteLogo";
 
 type NoticiaRonda = {
@@ -191,30 +190,12 @@ export function RondaClient({
       setShowEscalaNavLink(false);
       return;
     }
-    const supabase = createBrowserClient();
     let cancelado = false;
     void (async () => {
       try {
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
+        const res = await getSessionPrivilegesAction();
         if (cancelado) return;
-        if (!user?.id) {
-          setShowEscalaNavLink(false);
-          return;
-        }
-        const { data: row } = await supabase
-          .from("usuarios")
-          .select("funcao")
-          .eq("id", user.id)
-          .maybeSingle();
-        if (cancelado) return;
-        setShowEscalaNavLink(
-          canManageEscala({
-            email: user.email,
-            funcao: row?.funcao ?? null,
-          })
-        );
+        setShowEscalaNavLink(res.ok && res.session.canManageEscala);
       } catch (e) {
         if (!cancelado) {
           console.error("[RondaClient] permissão escala:", e);

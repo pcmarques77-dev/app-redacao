@@ -598,7 +598,7 @@ export function efemerideCalendarChipClass(
     return `${base} border-indigo-400/75 bg-indigo-100 text-indigo-950 ring-indigo-300/55`;
   }
   if (category === "gastronomia") {
-    return `${base} border-orange-400/80 bg-orange-100 text-orange-950 ring-orange-300/60`;
+    return `${base} border-teal-400/75 bg-teal-100 text-teal-950 ring-teal-300/55`;
   }
   return `${base} border-rose-400/75 bg-rose-100 text-rose-950 ring-rose-300/55`;
 }

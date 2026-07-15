@@ -6,19 +6,23 @@ import { getAdminActor } from "@/app/actions/admin";
 import {
   canManageNotaPessoal,
   canManageStreamyardEntry,
-  isEditorRole,
-  isSuperAdminEmail,
 } from "@/lib/admin-acl";
 import {
+  ESCALA_TIPO_AGENDA,
   ESCALA_TIPO_NOTAS,
   ESCALA_TIPO_PLANTAO,
   ESCALA_TIPO_STREAMYARD,
+  AGENDA_TITULO_MAX_LENGTH,
+  isAgendaTipo,
   isNotasTipo,
   isStreamyardTipo,
+  normalizeAgendaEditoria,
+  normalizeAgendaTitulo,
   normalizeNotaTexto,
   normalizeStreamyardHorario,
   NOTA_TEXTO_MAX_LENGTH,
 } from "@/lib/escala-constants";
+import { EDITORIA_OPTIONS } from "@/lib/pauta-form-options";
 import {
   dashboardEscalaQueryRange,
   plannerQueryRangeYm,
@@ -160,25 +164,16 @@ export async function listEscalasForDashboardAction(
   return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd, user.id);
 }
 
-async function assertCanManageEscala(
-  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user?.id) {
-    return { ok: false, error: "Sessão inválida. Faça login novamente." };
+/** Permissão de escala via service role — evita falso negativo com RLS em `usuarios`. */
+async function assertCanManageEscala(): Promise<
+  { ok: true; userId: string } | { ok: false; error: string }
+> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+  if (!actor.isSuperAdmin && !actor.isEditor) {
+    return { ok: false, error: ESCALA_ACCESS_DENIED };
   }
-  const { data: row } = await supabase
-    .from("usuarios")
-    .select("funcao")
-    .eq("id", user.id)
-    .maybeSingle();
-  const funcao = row?.funcao ?? null;
-  if (isSuperAdminEmail(user.email) || isEditorRole(funcao)) {
-    return { ok: true };
-  }
-  return { ok: false, error: ESCALA_ACCESS_DENIED };
+  return { ok: true, userId: actor.userId };
 }
 
 /**
@@ -201,8 +196,7 @@ export async function listEscalasOverlappingMonthPlannerAction(
     return { ok: false, error: "Mês inválido." };
   }
 
-  const supabase = await createServerSupabaseClient();
-  const gate = await assertCanManageEscala(supabase);
+  const gate = await assertCanManageEscala();
   if (!gate.ok) return gate;
 
   const admin = getServiceClient();
@@ -214,15 +208,8 @@ export async function listEscalasOverlappingMonthPlannerAction(
     };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user?.id) {
-    return { ok: false, error: "Sessão inválida. Faça login novamente." };
-  }
-
   const { rangeStart, rangeEnd } = plannerQueryRangeYm(year, monthIndex);
-  return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd, user.id);
+  return queryEscalasOverlappingRange(admin, rangeStart, rangeEnd, gate.userId);
 }
 
 /** Adiciona um plantão na data. Permite vários por dia; evita repetir o mesmo jornalista no mesmo dia. */
@@ -236,8 +223,7 @@ export async function savePlantaoForDateAction(
     return { ok: false, error: "Data ou jornalista inválido." };
   }
 
-  const supabase = await createServerSupabaseClient();
-  const gate = await assertCanManageEscala(supabase);
+  const gate = await assertCanManageEscala();
   if (!gate.ok) return gate;
 
   const admin = getServiceClient();
@@ -274,7 +260,7 @@ export async function savePlantaoForDateAction(
     horario: null,
   };
 
-  const { error } = await supabase.from("escalas").insert(payload);
+  const { error } = await admin.from("escalas").insert(payload);
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/");
@@ -294,8 +280,7 @@ export async function movePlantaoToDateAction(
     return { ok: false, error: "Dados inválidos." };
   }
 
-  const supabase = await createServerSupabaseClient();
-  const gate = await assertCanManageEscala(supabase);
+  const gate = await assertCanManageEscala();
   if (!gate.ok) return gate;
 
   const admin = getServiceClient();
@@ -345,7 +330,7 @@ export async function movePlantaoToDateAction(
     };
   }
 
-  const { error: updErr } = await supabase
+  const { error: updErr } = await admin
     .from("escalas")
     .update({ data_inicio: target })
     .eq("id", id);
@@ -367,8 +352,7 @@ export async function clearPlantoesForDateAction(
     return { ok: false, error: "Data inválida." };
   }
 
-  const supabase = await createServerSupabaseClient();
-  const gate = await assertCanManageEscala(supabase);
+  const gate = await assertCanManageEscala();
   if (!gate.ok) return gate;
 
   const admin = getServiceClient();
@@ -402,8 +386,7 @@ export async function deleteEscala(
     return { ok: false, error: "ID inválido." };
   }
 
-  const supabase = await createServerSupabaseClient();
-  const gate = await assertCanManageEscala(supabase);
+  const gate = await assertCanManageEscala();
   if (!gate.ok) return gate;
 
   const admin = getServiceClient();
@@ -428,8 +411,14 @@ export async function deleteEscala(
   if (isNotasTipo(existing.tipo)) {
     return { ok: false, error: NOTA_ACCESS_DENIED };
   }
+  if (isAgendaTipo(existing.tipo)) {
+    return {
+      ok: false,
+      error: "Use o formulário Agenda para editar ou excluir este evento.",
+    };
+  }
 
-  const { error } = await supabase.from("escalas").delete().eq("id", trimmed);
+  const { error } = await admin.from("escalas").delete().eq("id", trimmed);
   if (error) {
     return { ok: false, error: error.message };
   }
@@ -444,24 +433,30 @@ export async function saveEscalaAction(
   editingId: string | null | undefined,
   row: Record<string, unknown>
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const supabase = await createServerSupabaseClient();
-  const gate = await assertCanManageEscala(supabase);
+  const gate = await assertCanManageEscala();
   if (!gate.ok) return gate;
 
   if (isNotasTipo(typeof row.tipo === "string" ? row.tipo : null)) {
     return { ok: false, error: NOTA_ACCESS_DENIED };
   }
+  if (isAgendaTipo(typeof row.tipo === "string" ? row.tipo : null)) {
+    return {
+      ok: false,
+      error: "Use o formulário Agenda para editar ou excluir este evento.",
+    };
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
 
   const id = editingId?.trim();
   if (id) {
-    const admin = getServiceClient();
-    if (!admin) {
-      return {
-        ok: false,
-        error:
-          "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
-      };
-    }
     const { data: existing, error: fetchErr } = await admin
       .from("escalas")
       .select("id, tipo")
@@ -471,11 +466,17 @@ export async function saveEscalaAction(
     if (existing && isNotasTipo(existing.tipo)) {
       return { ok: false, error: NOTA_ACCESS_DENIED };
     }
+    if (existing && isAgendaTipo(existing.tipo)) {
+      return {
+        ok: false,
+        error: "Use o formulário Agenda para editar ou excluir este evento.",
+      };
+    }
 
-    const { error } = await supabase.from("escalas").update(row).eq("id", id);
+    const { error } = await admin.from("escalas").update(row).eq("id", id);
     if (error) return { ok: false, error: error.message };
   } else {
-    const { error } = await supabase.from("escalas").insert(row);
+    const { error } = await admin.from("escalas").insert(row);
     if (error) return { ok: false, error: error.message };
   }
 
@@ -924,6 +925,188 @@ export async function moveNotaToDateAction(
 
   const perm = assertCanManageNotaOwner(actor, uid);
   if (!perm.ok) return perm;
+
+  if (fromDate === target) {
+    return { ok: true };
+  }
+
+  const { error: updErr } = await admin
+    .from("escalas")
+    .update({ data_inicio: target })
+    .eq("id", id);
+
+  if (updErr) return { ok: false, error: updErr.message };
+
+  revalidatePath("/");
+  return { ok: true };
+}
+
+export async function saveAgendaAction(
+  editingId: string | null | undefined,
+  row: {
+    data_inicio: string;
+    titulo: string;
+    editoria: string;
+  }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const dataInicio = row.data_inicio?.trim() ?? "";
+  const tituloNorm = normalizeAgendaTitulo(row.titulo);
+  const editoriaNorm = normalizeAgendaEditoria(row.editoria, EDITORIA_OPTIONS);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dataInicio)) {
+    return { ok: false, error: "Data inválida." };
+  }
+  if (!tituloNorm) {
+    const rawLen = (row.titulo ?? "").trim().length;
+    if (rawLen > AGENDA_TITULO_MAX_LENGTH) {
+      return {
+        ok: false,
+        error: `O título pode ter no máximo ${AGENDA_TITULO_MAX_LENGTH} caracteres.`,
+      };
+    }
+    return { ok: false, error: "Informe o título." };
+  }
+  if (!editoriaNorm) {
+    return { ok: false, error: "Selecione uma editoria válida." };
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: profile, error: profileErr } = await admin
+    .from("usuarios")
+    .select("id")
+    .eq("id", actor.userId)
+    .maybeSingle();
+  if (profileErr) return { ok: false, error: profileErr.message };
+  if (!profile) {
+    return {
+      ok: false,
+      error:
+        "Seu perfil não está cadastrado em usuários. Procure a chefia da redação.",
+    };
+  }
+
+  const id = editingId?.trim();
+  if (id) {
+    const { data: existing, error: fetchErr } = await admin
+      .from("escalas")
+      .select("id, tipo")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr) return { ok: false, error: fetchErr.message };
+    if (!existing || !isAgendaTipo(existing.tipo)) {
+      return { ok: false, error: "Evento de agenda não encontrado." };
+    }
+  }
+
+  const payload = {
+    tipo: ESCALA_TIPO_AGENDA,
+    usuario_id: actor.userId,
+    data_inicio: dataInicio,
+    data_fim: null,
+    coordenador: tituloNorm,
+    horario: editoriaNorm,
+  };
+
+  if (id) {
+    const { error } = await admin.from("escalas").update(payload).eq("id", id);
+    if (error) return { ok: false, error: error.message };
+  } else {
+    const { error } = await admin.from("escalas").insert(payload);
+    if (error) return { ok: false, error: error.message };
+  }
+
+  revalidatePath("/");
+  return { ok: true };
+}
+
+export async function deleteAgendaAction(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const trimmed = id?.trim();
+  if (!trimmed) {
+    return { ok: false, error: "ID inválido." };
+  }
+
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: existing, error: fetchErr } = await admin
+    .from("escalas")
+    .select("id, tipo")
+    .eq("id", trimmed)
+    .maybeSingle();
+
+  if (fetchErr) return { ok: false, error: fetchErr.message };
+  if (!existing || !isAgendaTipo(existing.tipo)) {
+    return { ok: false, error: "Evento de agenda não encontrado." };
+  }
+
+  const { error } = await admin.from("escalas").delete().eq("id", trimmed);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/");
+  return { ok: true };
+}
+
+/** Move um evento de agenda para outro dia (arrastar no calendário). */
+export async function moveAgendaToDateAction(
+  escalaId: string,
+  targetDateYmd: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const id = escalaId?.trim();
+  const target = targetDateYmd?.trim();
+  if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(target)) {
+    return { ok: false, error: "Dados inválidos." };
+  }
+
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data: row, error: fetchErr } = await admin
+    .from("escalas")
+    .select("id, tipo, data_inicio")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (fetchErr) return { ok: false, error: fetchErr.message };
+  if (!row || !isAgendaTipo(row.tipo)) {
+    return { ok: false, error: "Evento de agenda não encontrado." };
+  }
+
+  const fromDate = row.data_inicio?.trim();
+  if (!fromDate) {
+    return { ok: false, error: "Evento inválido." };
+  }
 
   if (fromDate === target) {
     return { ok: true };

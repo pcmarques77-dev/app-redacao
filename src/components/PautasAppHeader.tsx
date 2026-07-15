@@ -2,22 +2,19 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { getSessionPrivilegesAction } from "@/app/actions/admin";
 import logoVivaTaglineAzul from "@/assets/logo-viva-tagline-azul.svg";
-import { isEditorRole, isSuperAdminEmail } from "@/lib/admin-acl";
 import {
   CALENDARIO_PAUTAS_PATH,
   clearDashboardCalStorage,
   dispatchDashboardHomeEvent,
 } from "@/lib/dashboard-home";
-import {
-  createBrowserClient,
-  ensureSupabaseAuthReady,
-} from "@/lib/supabase/client";
 
 /**
- * Cabeçalho do calendário geral (logo, cadastro, Admin, Radar de Pautas, Plantões, Nova Pauta).
- * Sessão lida no browser para não bloquear a barra num server action a cada navegação.
+ * Cabeçalho do calendário geral (logo, cadastro, Calendário, Radar de Pautas, Plantões*, Admin, Nova Pauta).
+ * *Plantões só para Editor/super admin.
+ * Privilégios via server action (ignora RLS no `funcao` do cliente).
  * Reutilizado em `/` e em páginas como `/escala/plantoes`.
  */
 export function PautasAppHeader() {
@@ -27,64 +24,42 @@ export function PautasAppHeader() {
     userId: string;
     email: string;
     nome: string | null;
-    funcao: string | null;
+    canManageEscala: boolean;
   } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    const supabase = createBrowserClient();
     void (async () => {
-      try {
-        await ensureSupabaseAuthReady(supabase);
-        if (cancelled) return;
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user?.id) {
-          if (!cancelled) setSessionCtx(null);
-          return;
-        }
-        const { data: row } = await supabase
-          .from("usuarios")
-          .select("nome, funcao")
-          .eq("id", user.id)
-          .maybeSingle();
-        if (cancelled) return;
-        setSessionCtx({
-          userId: user.id,
-          email: user.email ?? "",
-          nome: row?.nome ?? null,
-          funcao: row?.funcao ?? null,
-        });
-      } catch {
-        if (!cancelled) setSessionCtx(null);
+      const res = await getSessionPrivilegesAction();
+      if (cancelled) return;
+      if (!res.ok) {
+        setSessionCtx(null);
+        return;
       }
+      setSessionCtx({
+        userId: res.session.userId,
+        email: res.session.email,
+        nome: res.session.nome,
+        canManageEscala: res.session.canManageEscala,
+      });
     })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const privilegedSession = useMemo(
-    () =>
-      sessionCtx
-        ? isSuperAdminEmail(sessionCtx.email) ||
-          isEditorRole(sessionCtx.funcao)
-        : false,
-    [sessionCtx]
-  );
-
   const logoVivaTaglineSrc =
     typeof logoVivaTaglineAzul === "string"
       ? logoVivaTaglineAzul
       : logoVivaTaglineAzul.src;
 
-  const onAdmin = pathname.startsWith("/admin");
+  const onCalendario = pathname === CALENDARIO_PAUTAS_PATH;
   const onRadar = pathname.startsWith("/ronda-rss");
   const onPlantoes = pathname.startsWith("/escala/plantoes");
+  const onAdmin = pathname.startsWith("/admin");
   const onNovaPauta = pathname.startsWith("/nova-pauta");
 
-  const handleLogoClick = useCallback(
+  const handleCalendarioHomeClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>) => {
       if (pathname !== CALENDARIO_PAUTAS_PATH) return;
       e.preventDefault();
@@ -107,7 +82,7 @@ export function PautasAppHeader() {
         <h1 className="m-0">
           <Link
             href={CALENDARIO_PAUTAS_PATH}
-            onClick={handleLogoClick}
+            onClick={handleCalendarioHomeClick}
             aria-label="Ir para o Calendário de pautas"
             className="inline-block max-w-full cursor-pointer rounded-sm text-left transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
           >
@@ -136,11 +111,12 @@ export function PautasAppHeader() {
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
         <Link
-          href="/admin"
-          className={onAdmin ? outlineNavActive : outlineNavInactive}
-          aria-current={onAdmin ? "page" : undefined}
+          href={CALENDARIO_PAUTAS_PATH}
+          onClick={handleCalendarioHomeClick}
+          className={onCalendario ? outlineNavActive : outlineNavInactive}
+          aria-current={onCalendario ? "page" : undefined}
         >
-          Admin
+          Calendário
         </Link>
         <Link
           href="/ronda-rss"
@@ -149,7 +125,7 @@ export function PautasAppHeader() {
         >
           Radar de Pautas
         </Link>
-        {privilegedSession ? (
+        {sessionCtx?.canManageEscala ? (
           <Link
             href="/escala/plantoes"
             className={onPlantoes ? outlineNavActive : outlineNavInactive}
@@ -158,6 +134,13 @@ export function PautasAppHeader() {
             Plantões
           </Link>
         ) : null}
+        <Link
+          href="/admin"
+          className={onAdmin ? outlineNavActive : outlineNavInactive}
+          aria-current={onAdmin ? "page" : undefined}
+        >
+          Admin
+        </Link>
         <Link
           href="/nova-pauta"
           className={

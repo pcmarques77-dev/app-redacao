@@ -105,6 +105,40 @@ export async function getAdminActor(): Promise<AdminActor> {
   };
 }
 
+export type SessionPrivileges = {
+  userId: string;
+  email: string;
+  nome: string | null;
+  funcao: string | null;
+  isSuperAdmin: boolean;
+  isEditor: boolean;
+  canManageEscala: boolean;
+};
+
+/** Privilégios da sessão via service role (confiável para UI de Plantões / Escala). */
+export async function getSessionPrivilegesAction(): Promise<
+  { ok: true; session: SessionPrivileges } | { ok: false; error: string }
+> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+
+  const canManage =
+    actor.isSuperAdmin || actor.isEditor;
+
+  return {
+    ok: true,
+    session: {
+      userId: actor.userId,
+      email: actor.email,
+      nome: actor.nome,
+      funcao: actor.funcao,
+      isSuperAdmin: actor.isSuperAdmin,
+      isEditor: actor.isEditor,
+      canManageEscala: canManage,
+    },
+  };
+}
+
 export async function listUsuariosTableAction(): Promise<
   | { ok: true; rows: UsuarioTableRow[] }
   | { ok: false; error: string }

@@ -2,13 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
+import { getSessionPrivilegesAction } from "@/app/actions/admin";
 import { EscalaWeekendPlanner } from "@/components/EscalaWeekendPlanner";
 import { PautasAppHeader } from "@/components/PautasAppHeader";
-import { canManageEscala } from "@/lib/admin-acl";
-import {
-  createBrowserClient,
-  ensureSupabaseAuthReady,
-} from "@/lib/supabase/client";
 
 function PlantoesPageShell({ children }: { children?: ReactNode }) {
   return (
@@ -25,28 +21,10 @@ export default function EscalaPlantoesPage() {
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const supabase = createBrowserClient();
     void (async () => {
       try {
-        await ensureSupabaseAuthReady(supabase);
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user?.id) {
-          router.replace("/");
-          return;
-        }
-        const { data: row } = await supabase
-          .from("usuarios")
-          .select("funcao")
-          .eq("id", user.id)
-          .maybeSingle();
-        if (
-          !canManageEscala({
-            email: user.email,
-            funcao: row?.funcao ?? null,
-          })
-        ) {
+        const res = await getSessionPrivilegesAction();
+        if (!res.ok || !res.session.canManageEscala) {
           router.replace("/");
           return;
         }

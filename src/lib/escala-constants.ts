@@ -5,9 +5,13 @@ export const ESCALA_TIPO_PLANTAO = "Plantão";
 export const ESCALA_TIPO_FERIAS = "Férias";
 export const ESCALA_TIPO_STREAMYARD = "Streamyard";
 export const ESCALA_TIPO_NOTAS = "Notas";
+export const ESCALA_TIPO_AGENDA = "Agenda";
 
 /** Texto da nota pessoal (campo `coordenador` na tabela `escalas`). */
 export const NOTA_TEXTO_MAX_LENGTH = 2000;
+
+/** Título do evento de agenda (campo `coordenador`). */
+export const AGENDA_TITULO_MAX_LENGTH = 255;
 
 export function normalizeEscalaTipoKey(t: string | null | undefined): string {
   return (t ?? "")
@@ -25,6 +29,10 @@ export function isNotasTipo(t: string | null | undefined): boolean {
   return normalizeEscalaTipoKey(t) === "notas";
 }
 
+export function isAgendaTipo(t: string | null | undefined): boolean {
+  return normalizeEscalaTipoKey(t) === "agenda";
+}
+
 /** Normaliza o texto da nota pessoal para persistência. */
 export function normalizeNotaTexto(
   texto: string | null | undefined
@@ -32,6 +40,28 @@ export function normalizeNotaTexto(
   const t = (texto ?? "").trim();
   if (!t) return null;
   if (t.length > NOTA_TEXTO_MAX_LENGTH) return null;
+  return t;
+}
+
+/** Normaliza título de evento de agenda (`coordenador`). */
+export function normalizeAgendaTitulo(
+  titulo: string | null | undefined
+): string | null {
+  const t = (titulo ?? "").trim();
+  if (!t) return null;
+  if (t.length > AGENDA_TITULO_MAX_LENGTH) return null;
+  return t;
+}
+
+/** Editoria de agenda persistida em `escalas.horario`. */
+export function normalizeAgendaEditoria(
+  editoria: string | null | undefined,
+  validOptions: readonly string[]
+): string | null {
+  const t = (editoria ?? "").trim();
+  if (!t) return null;
+  const valid = new Set(validOptions);
+  if (!valid.has(t)) return null;
   return t;
 }
 
