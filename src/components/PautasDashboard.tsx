@@ -70,6 +70,10 @@ import {
   efemerideScopeEmoji,
   getEfemeridesForDay,
 } from "@/lib/br-efemerides";
+import {
+  createBrowserClient,
+  ensureSupabaseAuthReady,
+} from "@/lib/supabase/client";
 
 type ModalReporterOption = {
   id: string;
@@ -1684,9 +1688,43 @@ export function PautasDashboard() {
     setSessionCtx(res.session);
   }, [fetchDashboardData]);
 
+  const refreshDashboardDataRef = useRef(refreshDashboardData);
+  refreshDashboardDataRef.current = refreshDashboardData;
+
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Realtime: qualquer mudança em pautas/escalas dispara recarga (debounce). */
+  useEffect(() => {
+    const client = createBrowserClient();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const trigger = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void refreshDashboardDataRef.current();
+      }, 400);
+    };
+    const channel = client
+      .channel("dashboard-cards")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pautas" },
+        trigger
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "escalas" },
+        trigger
+      );
+    void ensureSupabaseAuthReady(client).then(() => {
+      channel.subscribe();
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      void client.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     if (skipEscalaRangeReloadRef.current) {
