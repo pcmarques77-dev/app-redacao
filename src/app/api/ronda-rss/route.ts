@@ -9,12 +9,6 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export const maxDuration = 120;
 
-const SNAPSHOT_FIRST_ON_VERCEL_KINDS = new Set<RondaRssKind>([
-  "inss",
-  "longevidade",
-  "jornais",
-]);
-
 function kindFromRequest(request: NextRequest): RondaRssKind {
   const kind = request.nextUrl.searchParams.get("kind");
   if (kind === "tech") return "tech";
@@ -28,8 +22,9 @@ function rondaRssSnapshotEnvEnabled(): boolean {
   return process.env.RONDA_RSS_USE_SUPABASE_SNAPSHOT === "1";
 }
 
-function preferSnapshotOnVercel(kind: RondaRssKind): boolean {
-  return process.env.VERCEL === "1" && SNAPSHOT_FIRST_ON_VERCEL_KINDS.has(kind);
+/** Na Vercel o fetch RSS costuma falhar/parcial; o scraper grava o snapshot. */
+function preferSnapshotOnVercel(): boolean {
+  return process.env.VERCEL === "1";
 }
 
 const getRondaRssCachedGov = unstable_cache(
@@ -143,11 +138,12 @@ async function resolverRondaRss(
   kind: RondaRssKind,
   refresh: boolean
 ): Promise<RondaRssAgregadoOk> {
-  const snapshotFirst =
-    !refresh &&
-    (rondaRssSnapshotEnvEnabled() || preferSnapshotOnVercel(kind));
+  // `refresh=1` só ignora o cache Next e relê o Supabase — não dispara fetch
+  // ao vivo na Vercel (isso devolvia lista parcial e “ganhava” do snapshot).
+  const snapshotPrimary =
+    rondaRssSnapshotEnvEnabled() || preferSnapshotOnVercel();
 
-  if (snapshotFirst) {
+  if (snapshotPrimary) {
     const snap = await lerSnapshot(kind, refresh);
     if (snap != null && snap.total > 0) return snap;
     if (rondaRssSnapshotEnvEnabled() && snap != null) return snap;
@@ -170,7 +166,7 @@ async function resolverRondaRss(
   return live;
 }
 
-/** Agrega feeds RSS ao vivo; na Vercel, rondas Google Notícias usam snapshot Supabase. */
+/** Na Vercel lê snapshot Supabase; fora dela agrega RSS (com fallback ao snapshot). */
 export async function GET(request: NextRequest) {
   const refresh = request.nextUrl.searchParams.get("refresh") === "1";
   const kind = kindFromRequest(request);
