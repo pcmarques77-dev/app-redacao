@@ -18,7 +18,7 @@ function getServiceClient(): SupabaseClient | null {
   });
 }
 
-/** Agrega RSS gov/tech/inss/longevidade e grava em `ronda_rss_snapshot` (ids 1–4). */
+/** Agrega RSS gov/tech/inss/longevidade/jornais e grava em `ronda_rss_snapshot` (ids 1–5). */
 export async function pushRondaRssSnapshots(): Promise<PushRondaRssSnapshotResult> {
   const supabase = getServiceClient();
   if (!supabase) {
@@ -29,7 +29,13 @@ export async function pushRondaRssSnapshots(): Promise<PushRondaRssSnapshotResul
     };
   }
 
-  const kinds: RondaRssKind[] = ["gov", "tech", "inss", "longevidade"];
+  const kinds: RondaRssKind[] = [
+    "gov",
+    "tech",
+    "inss",
+    "longevidade",
+    "jornais",
+  ];
   const totals = {} as Record<RondaRssKind, number>;
 
   for (const kind of kinds) {

@@ -1,5 +1,5 @@
 /**
- * Grava agregação RSS em `ronda_rss_snapshot` (ids 1=Gov, 2=Tech, 3=INSS, 4=Longevidade).
+ * Grava agregação RSS em `ronda_rss_snapshot` (ids 1=Gov, 2=Tech, 3=INSS, 4=Longevidade, 5=Jornais).
  * Necessário para rondas Google Notícias na Vercel (feeds bloqueados no datacenter).
  *
  *   npm run ronda:push-snapshot

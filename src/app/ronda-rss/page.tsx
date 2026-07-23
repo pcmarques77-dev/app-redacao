@@ -21,6 +21,11 @@ export default function RondaRssPage() {
       apiPath: "/api/ronda-rss?kind=gov",
     },
     {
+      id: "jornais",
+      label: "Ronda Jornais",
+      apiPath: "/api/ronda-rss?kind=jornais",
+    },
+    {
       id: "inss",
       label: "Ronda INSS",
       apiPath: "/api/ronda-rss?kind=inss",

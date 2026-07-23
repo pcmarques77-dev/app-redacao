@@ -9,7 +9,7 @@ export type RondaRssFeedConfig = {
   fonteDoTituloGoogleNews?: boolean;
 };
 
-export type RondaRssKind = "gov" | "tech" | "inss" | "longevidade";
+export type RondaRssKind = "gov" | "tech" | "inss" | "longevidade" | "jornais";
 
 export const RONDA_RSS_FEEDS_GOV: RondaRssFeedConfig[] = [
   {
@@ -134,11 +134,69 @@ export const RONDA_RSS_FEEDS_TECH: RondaRssFeedConfig[] = [
   },
 ];
 
+/** Grandes veículos — últimas/manchetes, sem filtro temático. */
+export const RONDA_RSS_FEEDS_JORNAIS: RondaRssFeedConfig[] = [
+  {
+    rssUrl: "https://g1.globo.com/rss/g1/",
+    fonte: "G1",
+  },
+  {
+    rssUrl: "https://pox.globo.com/rss/oglobo/",
+    fonte: "O Globo",
+  },
+  {
+    rssUrl: "https://feeds.folha.uol.com.br/emcimadahora/rss091.xml",
+    fonte: "Folha",
+  },
+  {
+    rssUrl: "https://rss.uol.com.br/feed/noticias.xml",
+    fonte: "UOL",
+  },
+  {
+    rssUrl: "https://www.metropoles.com/feed",
+    fonte: "Metrópoles",
+  },
+  {
+    rssUrl: "https://www.terra.com.br/rss",
+    fonte: "Terra",
+  },
+  {
+    rssUrl: "https://admin.cnnbrasil.com.br/feed/",
+    fonte: "CNN Brasil",
+  },
+  {
+    rssUrl:
+      "https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/economia/",
+    fonte: "Estadão",
+  },
+  {
+    rssUrl:
+      "https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/brasil/",
+    fonte: "Estadão",
+  },
+  {
+    rssUrl:
+      "https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/internacional/",
+    fonte: "Estadão",
+  },
+  {
+    rssUrl:
+      "https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/ciencia/",
+    fonte: "Estadão",
+  },
+  {
+    rssUrl:
+      "https://www.estadao.com.br/arc/outboundfeeds/feeds/rss/sections/pulsa/",
+    fonte: "Estadão",
+  },
+];
+
 const FEEDS_POR_KIND: Record<RondaRssKind, RondaRssFeedConfig[]> = {
   gov: RONDA_RSS_FEEDS_GOV,
   tech: RONDA_RSS_FEEDS_TECH,
   inss: RONDA_RSS_FEEDS_INSS,
   longevidade: RONDA_RSS_FEEDS_LONGEVIDADE,
+  jornais: RONDA_RSS_FEEDS_JORNAIS,
 };
 
 const ITENS_POR_FONTE = 10;
@@ -231,7 +289,8 @@ async function extrairItensRss(
 
   let feed: Awaited<ReturnType<Parser["parseString"]>>;
   try {
-    const parser = new Parser();
+    // UOL e outros veículos legados publicam `<rss>` sem atributo version.
+    const parser = new Parser({ defaultRSS: 2 });
     feed = await parser.parseString(xml);
   } catch (e) {
     console.error(`[ronda-rss] RSS (${fonte}): falha ao interpretar XML:`, e);
@@ -289,6 +348,29 @@ function ordenarComoRonda(a: ItemRonda, b: ItemRonda): number {
   return b.ordem - a.ordem;
 }
 
+function detectRssEncoding(
+  bytes: Uint8Array,
+  contentType: string | null
+): string {
+  const fromHeader = contentType?.match(/charset=([^;\s]+)/i)?.[1]?.trim();
+  if (fromHeader) return fromHeader.replace(/^["']|["']$/g, "");
+
+  const head = new TextDecoder("ascii").decode(bytes.slice(0, 256));
+  const fromXml = head.match(/encoding=["']([^"']+)["']/i)?.[1]?.trim();
+  if (fromXml) return fromXml;
+
+  return "utf-8";
+}
+
+function decodeRssBody(bytes: Uint8Array, contentType: string | null): string {
+  const encoding = detectRssEncoding(bytes, contentType);
+  try {
+    return new TextDecoder(encoding).decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+}
+
 async function buscarCorpoRss(
   rssUrl: string,
   fonte: string
@@ -309,7 +391,8 @@ async function buscarCorpoRss(
       console.error(`[ronda-rss] HTTP ${res.status} (${fonte}) — ${rssUrl}`);
       return { text: null, baseUrl };
     }
-    const text = await res.text();
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const text = decodeRssBody(bytes, res.headers.get("content-type"));
     return { text, baseUrl };
   } catch (e) {
     console.error(`[ronda-rss] Falha ao buscar (${fonte}) — ${rssUrl}:`, e);

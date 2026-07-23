@@ -24,6 +24,15 @@ export const LOGO_URL_POR_FONTE: Record<string, string> = {
   Canaltech: "https://canaltech.com.br/favicon.ico",
   Tecnoblog: "https://tecnoblog.net/favicon.ico",
   "Olhar Digital": "https://olhardigital.com.br/favicon.ico",
+  G1: "https://g1.globo.com/favicon.ico",
+  "O Globo": "https://oglobo.globo.com/favicon.ico",
+  Folha: "https://www.folha.uol.com.br/favicon.ico",
+  UOL: "https://conteudo.imguol.com.br/c/_layout/favicon/uol2021.ico",
+  Metrópoles: "https://www.metropoles.com/favicon.ico",
+  Terra: "https://www.terra.com.br/favicon.ico",
+  "CNN Brasil": "https://www.cnnbrasil.com.br/favicon.ico",
+  Estadão:
+    "https://www.estadao.com.br/pf/resources/apple-touch-icon.png?d=2552",
 };
 
 export function logoUrlDaFonte(fonte: string): string | undefined {

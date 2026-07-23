@@ -6,6 +6,7 @@ export const RONDA_RSS_SNAPSHOT_ROW: Record<RondaRssKind, number> = {
   tech: 2,
   inss: 3,
   longevidade: 4,
+  jornais: 5,
 };
 
 function parsePayload(raw: unknown): RondaRssAgregadoOk | null {

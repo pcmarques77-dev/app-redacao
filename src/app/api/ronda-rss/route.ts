@@ -9,13 +9,18 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export const maxDuration = 120;
 
-const GOOGLE_NEWS_KINDS = new Set<RondaRssKind>(["inss", "longevidade"]);
+const SNAPSHOT_FIRST_ON_VERCEL_KINDS = new Set<RondaRssKind>([
+  "inss",
+  "longevidade",
+  "jornais",
+]);
 
 function kindFromRequest(request: NextRequest): RondaRssKind {
   const kind = request.nextUrl.searchParams.get("kind");
   if (kind === "tech") return "tech";
   if (kind === "inss") return "inss";
   if (kind === "longevidade") return "longevidade";
+  if (kind === "jornais") return "jornais";
   return "gov";
 }
 
@@ -24,7 +29,7 @@ function rondaRssSnapshotEnvEnabled(): boolean {
 }
 
 function preferSnapshotOnVercel(kind: RondaRssKind): boolean {
-  return process.env.VERCEL === "1" && GOOGLE_NEWS_KINDS.has(kind);
+  return process.env.VERCEL === "1" && SNAPSHOT_FIRST_ON_VERCEL_KINDS.has(kind);
 }
 
 const getRondaRssCachedGov = unstable_cache(
@@ -48,6 +53,12 @@ const getRondaRssCachedInss = unstable_cache(
 const getRondaRssCachedLongevidade = unstable_cache(
   () => agregarRondaRss("longevidade"),
   ["ronda-rss-v5", "longevidade"],
+  { revalidate: 90 }
+);
+
+const getRondaRssCachedJornais = unstable_cache(
+  () => agregarRondaRss("jornais"),
+  ["ronda-rss-v5", "jornais"],
   { revalidate: 90 }
 );
 
@@ -75,6 +86,12 @@ const getSnapshotCachedLongevidade = unstable_cache(
   { revalidate: 45 }
 );
 
+const getSnapshotCachedJornais = unstable_cache(
+  () => readRondaRssSnapshotFromDb("jornais"),
+  ["ronda-rss-snapshot-v4", "jornais"],
+  { revalidate: 45 }
+);
+
 const JSON_NO_STORE = {
   "Cache-Control": "private, no-store, max-age=0, must-revalidate",
 } as const;
@@ -87,6 +104,8 @@ function cachedAggregator(kind: RondaRssKind) {
       return getRondaRssCachedInss;
     case "longevidade":
       return getRondaRssCachedLongevidade;
+    case "jornais":
+      return getRondaRssCachedJornais;
     default:
       return getRondaRssCachedGov;
   }
@@ -100,6 +119,8 @@ function snapshotReaderCached(kind: RondaRssKind) {
       return getSnapshotCachedInss;
     case "longevidade":
       return getSnapshotCachedLongevidade;
+    case "jornais":
+      return getSnapshotCachedJornais;
     default:
       return getSnapshotCachedGov;
   }

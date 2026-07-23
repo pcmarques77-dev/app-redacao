@@ -1,7 +1,6 @@
 # Plano: Ronda Jornais (grandes veículos)
 
-Status: **adiado** — implementar no Mac Mini / máquina de casa (com acesso ao scraper).  
-Decisão (2026-07-22): não filtrar por keywords de INSS/longevidade (já coberto pelas abas INSS e Longevidade).
+Status: **implementado** (2026-07-22).
 
 ## Objetivo do produto
 
