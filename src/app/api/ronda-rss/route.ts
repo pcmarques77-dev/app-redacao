@@ -68,31 +68,31 @@ const getRondaRssCachedJornais = unstable_cache(
 
 const getSnapshotCachedGov = unstable_cache(
   () => readRondaRssSnapshotFromDb("gov"),
-  ["ronda-rss-snapshot-v4", "gov"],
+  ["ronda-rss-snapshot-v5", "gov"],
   { revalidate: 45 }
 );
 
 const getSnapshotCachedTech = unstable_cache(
   () => readRondaRssSnapshotFromDb("tech"),
-  ["ronda-rss-snapshot-v4", "tech"],
+  ["ronda-rss-snapshot-v5", "tech"],
   { revalidate: 45 }
 );
 
 const getSnapshotCachedInss = unstable_cache(
   () => readRondaRssSnapshotFromDb("inss"),
-  ["ronda-rss-snapshot-v4", "inss"],
+  ["ronda-rss-snapshot-v5", "inss"],
   { revalidate: 45 }
 );
 
 const getSnapshotCachedLongevidade = unstable_cache(
   () => readRondaRssSnapshotFromDb("longevidade"),
-  ["ronda-rss-snapshot-v4", "longevidade"],
+  ["ronda-rss-snapshot-v5", "longevidade"],
   { revalidate: 45 }
 );
 
 const getSnapshotCachedJornais = unstable_cache(
   () => readRondaRssSnapshotFromDb("jornais"),
-  ["ronda-rss-snapshot-v4", "jornais"],
+  ["ronda-rss-snapshot-v5", "jornais"],
   { revalidate: 45 }
 );
 
@@ -159,26 +159,34 @@ async function resolverRondaRss(
       `[ronda-rss] snapshot vazio ou ausente (${kind}); tentando agregação ao vivo.`
     );
   } else if (!refresh) {
-    // Gov/Tech: 1ª carga prefere snapshot completo (scraper); live só no Atualizar.
+    // Gov/Tech: 1ª carga prefere snapshot completo (scraper).
     const snap = await lerSnapshot(kind, false);
     if (snap != null && snap.total > 0) return snap;
   }
 
   const live = await agregarAoVivo(kind, refresh);
-  if (live.total > 0) return live;
-
   const snap = await lerSnapshot(kind, true);
+
+  // Live parcial na Vercel (ex.: 1 item Agência SP) NÃO deve sobrescrever o snapshot.
   if (snap != null && snap.total > 0) {
-    console.warn(
-      `[ronda-rss] agregação ao vivo vazia (${kind}); usando snapshot Supabase.`
-    );
-    return snap;
+    if (live.total <= 0) {
+      console.warn(
+        `[ronda-rss] agregação ao vivo vazia (${kind}); usando snapshot Supabase.`
+      );
+      return snap;
+    }
+    if (live.total < snap.total) {
+      console.warn(
+        `[ronda-rss] live parcial (${kind}: ${live.total} < snapshot ${snap.total}); mantendo snapshot.`
+      );
+      return snap;
+    }
   }
 
   return live;
 }
 
-/** Gov/Tech: snapshot na abertura, live no Atualizar; demais abas: só snapshot na Vercel. */
+/** Gov/Tech: snapshot na abertura; live no Atualizar só se for pelo menos tão completo quanto o snapshot. */
 export async function GET(request: NextRequest) {
   const refresh = request.nextUrl.searchParams.get("refresh") === "1";
   const kind = kindFromRequest(request);
