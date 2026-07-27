@@ -63,7 +63,7 @@ import {
   type StreamyardInitialValues,
 } from "@/components/StreamyardForm";
 import { PlannerMonthPicker } from "@/components/PlannerMonthPicker";
-import { PautasAppHeader } from "@/components/PautasAppHeader";
+import { PautasAppHeader, type PautasHeaderSession } from "@/components/PautasAppHeader";
 import {
   efemerideCalendarChipClass,
   efemerideEmoji,
@@ -1268,7 +1268,11 @@ function StatusInlineSelect({
   );
 }
 
-export function PautasDashboard() {
+export function PautasDashboard({
+  headerSession = null,
+}: {
+  headerSession?: PautasHeaderSession | null;
+}) {
   const router = useRouter();
   const [pautas, setPautas] = useState<PautaRow[]>([]);
   const [escalas, setEscalas] = useState<EscalaRow[]>([]);
@@ -2437,7 +2441,7 @@ export function PautasDashboard() {
 
   return (
     <div className="mx-auto max-w-page px-4 py-10 sm:px-6 lg:px-8">
-      <PautasAppHeader />
+      <PautasAppHeader session={headerSession} />
 
       {loading && (
         <div

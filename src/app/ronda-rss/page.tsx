@@ -1,4 +1,5 @@
 import { RondaClient } from "@/app/ronda/RondaClient";
+import { loadPautasHeaderSession } from "@/components/PautasAppHeaderServer";
 
 /** Evita pré-render estático com URL vazia: lê env no deploy a cada request. */
 export const dynamic = "force-dynamic";
@@ -13,7 +14,9 @@ const discoverEmbedUrl =
   process.env.NEXT_PUBLIC_DISCOVER_MONITORING_URL?.trim() ||
   null;
 
-export default function RondaRssPage() {
+export default async function RondaRssPage() {
+  const headerSession = await loadPautasHeaderSession();
+
   const roundTabs = [
     {
       id: "gov",
@@ -60,6 +63,7 @@ export default function RondaRssPage() {
       tituloEhLink
       showHeaderDescription={false}
       showPautasAppHeader
+      headerSession={headerSession}
     />
   );
 }

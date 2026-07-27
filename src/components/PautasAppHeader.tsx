@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
-import { getSessionPrivilegesAction } from "@/app/actions/admin";
+import { useCallback } from "react";
 import logoVivaTaglineAzul from "@/assets/logo-viva-tagline-azul.svg";
 import {
   CALENDARIO_PAUTAS_PATH,
@@ -11,42 +10,25 @@ import {
   dispatchDashboardHomeEvent,
 } from "@/lib/dashboard-home";
 
+export type PautasHeaderSession = {
+  userId: string;
+  email: string;
+  nome: string | null;
+  canManageEscala: boolean;
+};
+
 /**
  * Cabeçalho do calendário geral (logo, cadastro, Calendário, Radar de Pautas, Produção*, Plantões*, Admin, Nova Pauta).
  * *Produção e Plantões só para Editor/super admin.
- * Privilégios via server action (ignora RLS no `funcao` do cliente).
- * Reutilizado em `/` e em páginas como `/escala/plantoes`.
+ * Sessão vem do servidor (sem fetch no cliente) para a nav já nascer no HTML.
  */
-export function PautasAppHeader() {
+export function PautasAppHeader({
+  session,
+}: {
+  session: PautasHeaderSession | null;
+}) {
   const pathname = usePathname();
   const router = useRouter();
-  const [sessionCtx, setSessionCtx] = useState<{
-    userId: string;
-    email: string;
-    nome: string | null;
-    canManageEscala: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const res = await getSessionPrivilegesAction();
-      if (cancelled) return;
-      if (!res.ok) {
-        setSessionCtx(null);
-        return;
-      }
-      setSessionCtx({
-        userId: res.session.userId,
-        email: res.session.email,
-        nome: res.session.nome,
-        canManageEscala: res.session.canManageEscala,
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const logoVivaTaglineSrc =
     typeof logoVivaTaglineAzul === "string"
@@ -97,15 +79,13 @@ export function PautasAppHeader() {
             />
           </Link>
         </h1>
-        {sessionCtx ? (
+        {session ? (
           <p className="mt-2 text-sm">
             <Link
-              href={`/admin?editar=${encodeURIComponent(sessionCtx.userId)}`}
+              href={`/admin?editar=${encodeURIComponent(session.userId)}`}
               className="font-medium text-blue-700 underline-offset-2 hover:text-blue-900 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
             >
-              {(sessionCtx.nome ?? "").trim() ||
-                sessionCtx.email ||
-                "Meu cadastro"}
+              {(session.nome ?? "").trim() || session.email || "Meu cadastro"}
             </Link>
           </p>
         ) : null}
@@ -126,7 +106,7 @@ export function PautasAppHeader() {
         >
           Radar de Pautas
         </Link>
-        {sessionCtx?.canManageEscala ? (
+        {session?.canManageEscala ? (
           <>
             <Link
               href="/producao"

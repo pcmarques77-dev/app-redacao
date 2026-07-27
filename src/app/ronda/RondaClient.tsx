@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getSessionPrivilegesAction } from "@/app/actions/admin";
-import { PautasAppHeader } from "@/components/PautasAppHeader";
+import { PautasAppHeader, type PautasHeaderSession } from "@/components/PautasAppHeader";
 import { FonteLogo } from "./FonteLogo";
 
 type NoticiaRonda = {
@@ -90,6 +90,7 @@ type RondaClientProps = {
   mainNavSecondIsAdmin?: boolean;
   /** Cabeçalho global do app (logo, cadastro, Admin, Radar, Plantões, Nova Pauta). */
   showPautasAppHeader?: boolean;
+  headerSession?: PautasHeaderSession | null;
 };
 
 export function RondaClient({
@@ -103,6 +104,7 @@ export function RondaClient({
   showMainNavRow = false,
   mainNavSecondIsAdmin = false,
   showPautasAppHeader = false,
+  headerSession = null,
 }: RondaClientProps) {
   const tabMode = roundTabs != null && roundTabs.length > 0;
   const [activeRoundId, setActiveRoundId] = useState(
@@ -212,7 +214,7 @@ export function RondaClient({
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/90">
       <div className="mx-auto max-w-page px-4 py-10 sm:px-6 lg:px-8">
         {showPautasAppHeader ? (
-          <PautasAppHeader />
+          <PautasAppHeader session={headerSession} />
         ) : (
           <header className="mb-8 flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-start sm:justify-between">
             <div>

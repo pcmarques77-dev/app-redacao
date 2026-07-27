@@ -222,7 +222,7 @@ export async function listHardNewsQueueAction(): Promise<
       `
     )
     .eq("hard_news", true)
-    .in("status", ["Em produção", "Pronto"])
+    .in("status", ["Em produção", "Pronto", "Publicada"])
     .order("data_criacao", { ascending: false });
 
   if (error) return { ok: false, error: error.message };
@@ -236,15 +236,6 @@ export async function listHardNewsQueueAction(): Promise<
       ...row,
       status: coercePautaStatus(rawStatus),
     };
-  });
-
-  rows.sort((a, b) => {
-    const na = (a.reporter?.nome ?? "").trim().toLocaleLowerCase("pt-BR");
-    const nb = (b.reporter?.nome ?? "").trim().toLocaleLowerCase("pt-BR");
-    if (na !== nb) return na.localeCompare(nb, "pt-BR");
-    const da = a.data_criacao ?? "";
-    const db = b.data_criacao ?? "";
-    return db.localeCompare(da);
   });
 
   return { ok: true, rows };

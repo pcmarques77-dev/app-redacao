@@ -40,6 +40,7 @@ export function SignOutButton() {
       onClick={() => void handleLogout()}
       disabled={loggingOut}
       title="Encerrar sessão"
+      suppressHydrationWarning
       className="fixed bottom-6 right-6 z-30 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
     >
       {loggingOut ? "Saindo…" : "Sair"}
