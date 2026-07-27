@@ -12,8 +12,8 @@ import {
 } from "@/lib/dashboard-home";
 
 /**
- * Cabeçalho do calendário geral (logo, cadastro, Calendário, Radar de Pautas, Plantões*, Admin, Nova Pauta).
- * *Plantões só para Editor/super admin.
+ * Cabeçalho do calendário geral (logo, cadastro, Calendário, Radar de Pautas, Produção*, Plantões*, Admin, Nova Pauta).
+ * *Produção e Plantões só para Editor/super admin.
  * Privilégios via server action (ignora RLS no `funcao` do cliente).
  * Reutilizado em `/` e em páginas como `/escala/plantoes`.
  */
@@ -56,6 +56,7 @@ export function PautasAppHeader() {
   const onCalendario = pathname === CALENDARIO_PAUTAS_PATH;
   const onRadar = pathname.startsWith("/ronda-rss");
   const onPlantoes = pathname.startsWith("/escala/plantoes");
+  const onProducao = pathname.startsWith("/producao");
   const onAdmin = pathname.startsWith("/admin");
   const onNovaPauta = pathname.startsWith("/nova-pauta");
 
@@ -126,13 +127,22 @@ export function PautasAppHeader() {
           Radar de Pautas
         </Link>
         {sessionCtx?.canManageEscala ? (
-          <Link
-            href="/escala/plantoes"
-            className={onPlantoes ? outlineNavActive : outlineNavInactive}
-            aria-current={onPlantoes ? "page" : undefined}
-          >
-            Plantões
-          </Link>
+          <>
+            <Link
+              href="/producao"
+              className={onProducao ? outlineNavActive : outlineNavInactive}
+              aria-current={onProducao ? "page" : undefined}
+            >
+              Produção
+            </Link>
+            <Link
+              href="/escala/plantoes"
+              className={onPlantoes ? outlineNavActive : outlineNavInactive}
+              aria-current={onPlantoes ? "page" : undefined}
+            >
+              Plantões
+            </Link>
+          </>
         ) : null}
         <Link
           href="/admin"

@@ -8,8 +8,11 @@ import {
   PAUTA_ACCESS_DENIED,
   coercePautaStatus,
   isPautaStatus,
+  type CreateHardNewsInput,
   type CreatePautaInput,
+  type HardNewsQueueRow,
   type PautaDashboardRow,
+  type PautaStatus,
   type UpdatePautaPatch,
 } from "@/lib/pautas-shared";
 import { filterUsuariosForSelects } from "@/lib/usuarios-select";
@@ -140,7 +143,7 @@ export async function listPautasDashboardAction(): Promise<
     };
   }
 
-  const q = admin
+  let q = admin
     .from("pautas")
     .select(
       `
@@ -154,12 +157,14 @@ export async function listPautasDashboardAction(): Promise<
         reporter:usuarios!pautas_reporter_id_fkey(nome)
       `
     )
+    .eq("hard_news", false)
     .order("deadline", { ascending: true, nullsFirst: false });
 
   const privileged = actor.isSuperAdmin || actor.isEditor;
-  const { data, error } = await (privileged
-    ? q
-    : q.eq("reporter_id", actor.userId));
+  if (!privileged) {
+    q = q.eq("reporter_id", actor.userId);
+  }
+  const { data, error } = await q;
   if (error) return { ok: false, error: error.message };
   const rows = ((data ?? []) as unknown as PautaDashboardRow[]).map((row) => {
     const rawStatus =
@@ -174,6 +179,223 @@ export async function listPautasDashboardAction(): Promise<
     };
   });
   return { ok: true, rows };
+}
+
+function todayDeadlineIso(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+/** Fila ativa de hard news — só Editor / super admin. */
+export async function listHardNewsQueueAction(): Promise<
+  | { ok: true; rows: HardNewsQueueRow[] }
+  | { ok: false; error: string }
+> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+  if (!isPrivileged(actor)) {
+    return { ok: false, error: "Acesso restrito a editores." };
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const { data, error } = await admin
+    .from("pautas")
+    .select(
+      `
+        id,
+        titulo_provisorio,
+        status,
+        reporter_id,
+        data_criacao,
+        reporter:usuarios!pautas_reporter_id_fkey(nome)
+      `
+    )
+    .eq("hard_news", true)
+    .in("status", ["Em produção", "Pronto"])
+    .order("data_criacao", { ascending: false });
+
+  if (error) return { ok: false, error: error.message };
+
+  const rows = ((data ?? []) as unknown as HardNewsQueueRow[]).map((row) => {
+    const rawStatus =
+      typeof row.status === "string" || row.status === null
+        ? row.status
+        : null;
+    return {
+      ...row,
+      status: coercePautaStatus(rawStatus),
+    };
+  });
+
+  rows.sort((a, b) => {
+    const na = (a.reporter?.nome ?? "").trim().toLocaleLowerCase("pt-BR");
+    const nb = (b.reporter?.nome ?? "").trim().toLocaleLowerCase("pt-BR");
+    if (na !== nb) return na.localeCompare(nb, "pt-BR");
+    const da = a.data_criacao ?? "";
+    const db = b.data_criacao ?? "";
+    return db.localeCompare(da);
+  });
+
+  return { ok: true, rows };
+}
+
+/** Cria item de hard news (título + reporter). Só Editor / super admin. */
+export async function createHardNewsAction(
+  input: CreateHardNewsInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+  if (!isPrivileged(actor)) {
+    return { ok: false, error: "Acesso restrito a editores." };
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const titulo = input.titulo_provisorio?.trim() ?? "";
+  if (!titulo) return { ok: false, error: "Informe o título." };
+
+  const reporter_id = (input.reporter_id ?? "").trim();
+  if (!reporter_id) return { ok: false, error: "Selecione um repórter." };
+
+  const { error } = await admin.from("pautas").insert({
+    titulo_provisorio: titulo,
+    fontes: null,
+    arquivos_urls: [],
+    editoria: "Últimas Notícias",
+    deadline: todayDeadlineIso(),
+    status: "Em produção",
+    reporter_id,
+    demanda_multimidia: false,
+    hard_news: true,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/** Atualiza status (e opcionalmente reporter) de um item hard news. Só editores. */
+export async function updateHardNewsAction(
+  id: string,
+  patch: { status?: PautaStatus; reporter_id?: string }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+  if (!isPrivileged(actor)) {
+    return { ok: false, error: "Acesso restrito a editores." };
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const pautaId = id?.trim();
+  if (!pautaId) return { ok: false, error: "ID inválido." };
+
+  const { data: existing, error: selErr } = await admin
+    .from("pautas")
+    .select("id, hard_news")
+    .eq("id", pautaId)
+    .maybeSingle();
+
+  if (selErr) return { ok: false, error: selErr.message };
+  if (!existing) return { ok: false, error: "Item não encontrado." };
+  if (existing.hard_news !== true) {
+    return { ok: false, error: "Este item não é hard news." };
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  if (patch.status !== undefined) {
+    const s = String(patch.status).trim();
+    if (!isPautaStatus(s)) {
+      return { ok: false, error: "Status inválido." };
+    }
+    sanitized.status = s;
+  }
+  if (patch.reporter_id !== undefined) {
+    const rid = patch.reporter_id.trim();
+    if (!rid) return { ok: false, error: "Selecione um repórter." };
+    sanitized.reporter_id = rid;
+  }
+
+  if (Object.keys(sanitized).length === 0) {
+    return { ok: false, error: "Nada para atualizar." };
+  }
+
+  const { error: upErr } = await admin
+    .from("pautas")
+    .update(sanitized)
+    .eq("id", pautaId)
+    .eq("hard_news", true);
+
+  if (upErr) return { ok: false, error: upErr.message };
+  return { ok: true };
+}
+
+/** Remove item da fila de hard news. Só editores. */
+export async function deleteHardNewsAction(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const actor = await getAdminActor();
+  if (!actor.ok) return { ok: false, error: actor.error };
+  if (!isPrivileged(actor)) {
+    return { ok: false, error: "Acesso restrito a editores." };
+  }
+
+  const admin = getServiceClient();
+  if (!admin) {
+    return {
+      ok: false,
+      error:
+        "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
+    };
+  }
+
+  const pautaId = id?.trim();
+  if (!pautaId) return { ok: false, error: "ID inválido." };
+
+  const { data: existing, error: selErr } = await admin
+    .from("pautas")
+    .select("id, hard_news")
+    .eq("id", pautaId)
+    .maybeSingle();
+
+  if (selErr) return { ok: false, error: selErr.message };
+  if (!existing) return { ok: false, error: "Item não encontrado." };
+  if (existing.hard_news !== true) {
+    return { ok: false, error: "Este item não é hard news." };
+  }
+
+  const { error: delErr } = await admin
+    .from("pautas")
+    .delete()
+    .eq("id", pautaId)
+    .eq("hard_news", true);
+
+  if (delErr) return { ok: false, error: delErr.message };
+  return { ok: true };
 }
 
 export async function createPautaAction(

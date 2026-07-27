@@ -83,6 +83,7 @@ export async function loadDashboardAction(
           reporter:usuarios!pautas_reporter_id_fkey(nome)
         `
     )
+    .eq("hard_news", false)
     .order("deadline", { ascending: true, nullsFirst: false });
 
   if (!privileged) {

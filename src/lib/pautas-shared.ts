@@ -37,6 +37,16 @@ export type PautaDashboardRow = {
 /** Alias semântico para o registro de pauta (`public.pautas`). */
 export type Pauta = PautaDashboardRow;
 
+/** Item ativo da fila de hard news (editores). */
+export type HardNewsQueueRow = {
+  id: string;
+  titulo_provisorio: string | null;
+  status: PautaStatus;
+  reporter_id: string | null;
+  data_criacao: string | null;
+  reporter: { nome: string | null } | null;
+};
+
 export type CreatePautaInput = {
   titulo_provisorio: string;
   fontes?: string | null;
@@ -46,6 +56,11 @@ export type CreatePautaInput = {
   status: PautaStatus;
   reporter_id?: string | null;
   demanda_multimidia?: boolean;
+};
+
+export type CreateHardNewsInput = {
+  titulo_provisorio: string;
+  reporter_id: string;
 };
 
 export type UpdatePautaPatch = Partial<{
