@@ -26,7 +26,7 @@ function loginUrl(request: NextRequest): URL {
 }
 
 /** Na Vercel (ou com AUTH_MIDDLEWARE_NETWORK=1) valida no Auth API. */
-function useNetworkAuth(): boolean {
+function networkAuthEnabled(): boolean {
   return (
     process.env.VERCEL === "1" ||
     process.env.AUTH_MIDDLEWARE_NETWORK === "1"
@@ -123,7 +123,7 @@ async function signOutOnResponse(
     }
   }
 
-  if (!useNetworkAuth()) return;
+  if (!networkAuthEnabled()) return;
 
   try {
     const supabase = createServerClient(supabaseUrl, anonKey, {
@@ -160,7 +160,7 @@ async function resolveUser(
   anonKey: string,
   onCookiesUpdated: (response: NextResponse) => void
 ): Promise<MiddlewareUser | null> {
-  if (!useNetworkAuth()) {
+  if (!networkAuthEnabled()) {
     const token = readAccessTokenFromCookies(request);
     return token ? userFromAccessToken(token) : null;
   }
