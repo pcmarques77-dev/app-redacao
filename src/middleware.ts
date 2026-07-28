@@ -5,6 +5,11 @@ import {
   SESSION_WALL_MS,
 } from "@/lib/session-constants";
 
+type MiddlewareUser = {
+  id: string;
+  email?: string;
+};
+
 function noStore(res: NextResponse) {
   res.headers.set(
     "Cache-Control",
@@ -20,6 +25,89 @@ function loginUrl(request: NextRequest): URL {
   return redirectUrl;
 }
 
+/** Na Vercel (ou com AUTH_MIDDLEWARE_NETWORK=1) valida no Auth API. */
+function useNetworkAuth(): boolean {
+  return (
+    process.env.VERCEL === "1" ||
+    process.env.AUTH_MIDDLEWARE_NETWORK === "1"
+  );
+}
+
+/**
+ * Lê access_token dos cookies sb-*-auth-token (inclui chunks .0/.1…)
+ * sem chamar a rede — evita spam de fetch failed atrás de proxy corporativo.
+ */
+function readAccessTokenFromCookies(request: NextRequest): string | null {
+  const cookies = request.cookies.getAll();
+  const tokenCookies = cookies.filter((c) =>
+    /auth-token(\.\d+)?$/i.test(c.name)
+  );
+  if (tokenCookies.length === 0) return null;
+
+  const single = tokenCookies.find((c) => !/\.\d+$/.test(c.name));
+  const chunks = tokenCookies
+    .filter((c) => /\.\d+$/.test(c.name))
+    .sort((a, b) => {
+      const na = Number(a.name.slice(a.name.lastIndexOf(".") + 1));
+      const nb = Number(b.name.slice(b.name.lastIndexOf(".") + 1));
+      return na - nb;
+    });
+
+  const raw = single?.value ?? chunks.map((c) => c.value).join("");
+  if (!raw) return null;
+
+  try {
+    let text = raw;
+    if (text.startsWith("base64-")) {
+      const b64 = text.slice("base64-".length).replace(/-/g, "+").replace(/_/g, "/");
+      text = atob(b64);
+    } else {
+      try {
+        text = decodeURIComponent(text);
+      } catch {
+        /* já é texto */
+      }
+    }
+
+    const data = JSON.parse(text) as
+      | { access_token?: string }
+      | [{ access_token?: string }];
+    if (Array.isArray(data)) {
+      return data[0]?.access_token?.trim() || null;
+    }
+    return data.access_token?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function userFromAccessToken(token: string): MiddlewareUser | null {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+    const payload = JSON.parse(atob(b64 + pad)) as {
+      sub?: string;
+      email?: string;
+      exp?: number;
+    };
+    if (typeof payload.sub !== "string" || !payload.sub) return null;
+    if (
+      typeof payload.exp === "number" &&
+      payload.exp * 1000 < Date.now()
+    ) {
+      return null;
+    }
+    return {
+      id: payload.sub,
+      email: typeof payload.email === "string" ? payload.email : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function signOutOnResponse(
   request: NextRequest,
   response: NextResponse,
@@ -28,20 +116,32 @@ async function signOutOnResponse(
 ) {
   response.cookies.delete(SESSION_START_COOKIE);
 
-  const supabase = createServerClient(supabaseUrl, anonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) =>
-          response.cookies.set(name, value, options)
-        );
-      },
-    },
-  });
+  // Limpa cookies de auth localmente (sem rede).
+  for (const c of request.cookies.getAll()) {
+    if (/auth-token/i.test(c.name)) {
+      response.cookies.set(c.name, "", { path: "/", maxAge: 0 });
+    }
+  }
 
-  await supabase.auth.signOut();
+  if (!useNetworkAuth()) return;
+
+  try {
+    const supabase = createServerClient(supabaseUrl, anonKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          );
+        },
+      },
+    });
+    await supabase.auth.signOut();
+  } catch {
+    // Rede/proxy: cookies locais já foram limpos.
+  }
 }
 
 async function signOutAndRedirectToLogin(
@@ -49,25 +149,24 @@ async function signOutAndRedirectToLogin(
   supabaseUrl: string,
   anonKey: string
 ) {
-  const redirectRes = noStore(
-    NextResponse.redirect(loginUrl(request))
-  );
-
+  const redirectRes = noStore(NextResponse.redirect(loginUrl(request)));
   await signOutOnResponse(request, redirectRes, supabaseUrl, anonKey);
   return redirectRes;
 }
 
-export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request });
-
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-
-  if (!url || !anon) {
-    return supabaseResponse;
+async function resolveUser(
+  request: NextRequest,
+  supabaseUrl: string,
+  anonKey: string,
+  onCookiesUpdated: (response: NextResponse) => void
+): Promise<MiddlewareUser | null> {
+  if (!useNetworkAuth()) {
+    const token = readAccessTokenFromCookies(request);
+    return token ? userFromAccessToken(token) : null;
   }
 
-  const supabase = createServerClient(url, anon, {
+  let supabaseResponse = NextResponse.next({ request });
+  const supabase = createServerClient(supabaseUrl, anonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -80,13 +179,45 @@ export async function middleware(request: NextRequest) {
         cookiesToSet.forEach(({ name, value, options }) =>
           supabaseResponse.cookies.set(name, value, options)
         );
+        onCookiesUpdated(supabaseResponse);
       },
     },
   });
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) {
+      console.warn(
+        "[middleware] Supabase auth indisponível; seguindo sem sessão.",
+        error.message
+      );
+      return null;
+    }
+    const u = data.user;
+    if (!u) return null;
+    return { id: u.id, email: u.email ?? undefined };
+  } catch (e) {
+    console.warn(
+      "[middleware] Supabase auth indisponível; seguindo sem sessão.",
+      e instanceof Error ? e.message : e
+    );
+    return null;
+  }
+}
+
+export async function middleware(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({ request });
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+
+  if (!url || !anon) {
+    return supabaseResponse;
+  }
+
+  const user = await resolveUser(request, url, anon, (res) => {
+    supabaseResponse = res;
+  });
 
   const path = request.nextUrl.pathname;
   const isLogin = path === "/login";

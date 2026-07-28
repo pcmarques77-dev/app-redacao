@@ -1227,11 +1227,61 @@ function DeadlineInlineInput({
   onChange: (pautaId: string, novaData: string) => void;
 }) {
   const ymd = parseDeadlineToYmd(deadline);
+  const committed = ymd ?? "";
+  const inputRef = useRef<HTMLInputElement>(null);
+  const committedRef = useRef(committed);
+  const onChangeRef = useRef(onChange);
+
+  committedRef.current = committed;
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+
+    const commit = () => {
+      const next = el.value.trim();
+      const prev = committedRef.current;
+      if (!next || !/^\d{4}-\d{2}-\d{2}$/.test(next)) {
+        el.value = prev;
+        return;
+      }
+      if (next === prev) return;
+      onChangeRef.current(pautaId, next);
+    };
+
+    // Native `change` (not React onChange/`input`) fires when the picker
+    // commits — e.g. day click or OK — without tearing down month navigation.
+    el.addEventListener("change", commit);
+    return () => el.removeEventListener("change", commit);
+  }, [pautaId]);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el || document.activeElement === el) return;
+    if (el.value !== committed) el.value = committed;
+  }, [committed]);
+
   return (
     <input
+      ref={inputRef}
       type="date"
-      value={ymd ?? ""}
-      onChange={(e) => onChange(pautaId, e.target.value)}
+      defaultValue={committed}
+      onBlur={(e) => {
+        const next = e.currentTarget.value.trim();
+        const prev = committedRef.current;
+        if (!next || !/^\d{4}-\d{2}-\d{2}$/.test(next)) {
+          e.currentTarget.value = prev;
+          return;
+        }
+        if (next === prev) return;
+        onChange(pautaId, next);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.currentTarget.blur();
+        }
+      }}
       disabled={saving}
       aria-label={`Editar prazo da pauta (${formatDeadlinePtBR(ymd)})`}
       className="max-w-[11rem] cursor-pointer rounded border-none bg-transparent p-0 text-sm text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:opacity-60"
