@@ -29,6 +29,13 @@ export default async function RondaRssPage() {
       apiPath: "/api/ronda-rss?kind=jornais",
     },
     {
+      id: "trends-seo",
+      label: "Google Trends",
+      apiPath: "/api/trends-seo",
+      emptyLabel: "Nenhum assunto em alta retornado pelo Google Trends.",
+      enableDateVolumeSort: true,
+    },
+    {
       id: "inss",
       label: "Ronda INSS",
       apiPath: "/api/ronda-rss?kind=inss",

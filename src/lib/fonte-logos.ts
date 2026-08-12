@@ -33,6 +33,7 @@ export const LOGO_URL_POR_FONTE: Record<string, string> = {
   "CNN Brasil": "https://www.cnnbrasil.com.br/favicon.ico",
   Estadão:
     "https://www.estadao.com.br/pf/resources/apple-touch-icon.png?d=2552",
+  "Google Trends": "https://www.google.com/favicon.ico",
 };
 
 export function logoUrlDaFonte(fonte: string): string | undefined {

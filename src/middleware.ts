@@ -236,7 +236,8 @@ export async function middleware(request: NextRequest) {
     path.startsWith("/ronda-rss") ||
     path.startsWith("/ronda") ||
     path.startsWith("/api/ronda-rss") ||
-    path.startsWith("/api/ronda");
+    path.startsWith("/api/ronda") ||
+    path.startsWith("/api/trends-seo");
 
   let sessionStartTs: number | null = null;
   let sessionExpired = false;

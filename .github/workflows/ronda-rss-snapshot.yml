@@ -1,5 +1,5 @@
-# Atualiza snapshots RSS do Radar de Pautas no Supabase.
-# Necessário para Ronda INSS e Longevidade (Google Notícias bloqueia a Vercel).
+# Atualiza snapshots do Radar de Pautas no Supabase (RSS + Trends SEO).
+# Necessário para Ronda INSS/Longevidade (Google Notícias) e fallback do Trends.
 #
 # Secrets em Settings → Secrets and variables → Actions:
 #   NEXT_PUBLIC_SUPABASE_URL
@@ -37,6 +37,12 @@ jobs:
 
       - name: Push RSS snapshots to Supabase
         run: npm run ronda:push-snapshot
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+
+      - name: Push Trends SEO snapshot to Supabase
+        run: npm run trends:push-snapshot
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

@@ -1,10 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionPrivilegesAction } from "@/app/actions/admin";
 import { PautasAppHeader, type PautasHeaderSession } from "@/components/PautasAppHeader";
 import { FonteLogo } from "./FonteLogo";
+
+const TRENDS_DISPLAY_LIMIT = 50;
+
+type TrendsSortMode = "date" | "volume";
 
 type NoticiaRonda = {
   titulo: string;
@@ -12,6 +16,10 @@ type NoticiaRonda = {
   fonte: string;
   data_publicacao: string;
   publicado_em: string | null;
+  /** Ex.: volume aproximado no Google Trends ("10.000+ buscas"). */
+  destaque?: string | null;
+  /** Volume numérico para ordenação (Google Trends). */
+  volumeOrdenacao?: number;
 };
 
 function formatRelativePast(iso: string): string {
@@ -67,7 +75,29 @@ type RondaRoundTab = {
   embedUrl?: string;
   /** JSON no formato de `/api/ronda` / `/api/ronda-rss`. Ignorado quando há `embedUrl`. */
   apiPath?: string;
+  /** Mensagem quando a lista vem vazia (padrão: texto genérico de ronda). */
+  emptyLabel?: string;
+  /** Google Trends: permite ordenar por data ou volume de pesquisa. */
+  enableDateVolumeSort?: boolean;
 };
+
+function sortNoticiasTrends(
+  items: NoticiaRonda[],
+  mode: TrendsSortMode
+): NoticiaRonda[] {
+  const sorted = [...items].sort((a, b) => {
+    if (mode === "volume") {
+      const va = a.volumeOrdenacao ?? 0;
+      const vb = b.volumeOrdenacao ?? 0;
+      if (vb !== va) return vb - va;
+    }
+    const ta = a.publicado_em ? new Date(a.publicado_em).getTime() : 0;
+    const tb = b.publicado_em ? new Date(b.publicado_em).getTime() : 0;
+    if (tb !== ta) return tb - ta;
+    return (b.volumeOrdenacao ?? 0) - (a.volumeOrdenacao ?? 0);
+  });
+  return sorted.slice(0, TRENDS_DISPLAY_LIMIT);
+}
 
 type RondaClientProps = {
   /** Título principal do cabeçalho (ex.: /ronda-rss ou /radar-pautas). */
@@ -129,6 +159,14 @@ export function RondaClient({
   const [erro, setErro] = useState<string | null>(null);
   const autoLoadFeito = useRef(false);
   const [showEscalaNavLink, setShowEscalaNavLink] = useState(false);
+  const [trendsSort, setTrendsSort] = useState<TrendsSortMode>("date");
+
+  const enableTrendsSort = !!activeRoundTab?.enableDateVolumeSort;
+
+  const noticiasExibidas = useMemo(() => {
+    if (!enableTrendsSort) return noticias;
+    return sortNoticiasTrends(noticias, trendsSort);
+  }, [enableTrendsSort, noticias, trendsSort]);
 
   const atualizarRonda = useCallback(async (forceRefresh?: boolean) => {
     if (!effectiveApiPath) {
@@ -162,7 +200,14 @@ export function RondaClient({
       if (!res.ok || body.ok === false) {
         throw new Error(body.error ?? "Não foi possível carregar a ronda.");
       }
-      setNoticias(body.noticias ?? []);
+      setNoticias(
+        (body.noticias ?? []).map((n) => ({
+          ...n,
+          destaque: n.destaque ?? null,
+          volumeOrdenacao:
+            typeof n.volumeOrdenacao === "number" ? n.volumeOrdenacao : 0,
+        }))
+      );
     } catch (e) {
       setErro(erroParaMensagem(e));
       setNoticias([]);
@@ -300,7 +345,7 @@ export function RondaClient({
         ) : null}
 
         {!embedUrl ? (
-          <div className="mb-8">
+          <div className="mb-8 flex flex-wrap items-center gap-3">
             <button
               type="button"
               disabled={carregandoLista}
@@ -313,6 +358,36 @@ export function RondaClient({
             >
               {carregandoLista ? "Carregando..." : atualizarLabel}
             </button>
+            {enableTrendsSort ? (
+              <div
+                className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 shadow-sm"
+                role="group"
+                aria-label="Ordenar Google Trends"
+              >
+                <button
+                  type="button"
+                  onClick={() => setTrendsSort("date")}
+                  className={
+                    trendsSort === "date"
+                      ? "rounded-md bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-900"
+                      : "rounded-md px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  }
+                >
+                  Por data
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTrendsSort("volume")}
+                  className={
+                    trendsSort === "volume"
+                      ? "rounded-md bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-900"
+                      : "rounded-md px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  }
+                >
+                  Por volume
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="mb-6">
@@ -339,10 +414,11 @@ export function RondaClient({
         {jaBuscou &&
           !carregandoLista &&
           !embedUrl &&
-          noticias.length === 0 && (
+          noticiasExibidas.length === 0 && (
             <p className="rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-12 text-center text-sm text-slate-500">
-              Nenhuma notícia retornada pelos feeds. Clique em{" "}
-              <strong>{atualizarLabel}</strong> para tentar de novo.
+              {activeRoundTab?.emptyLabel ??
+                "Nenhuma notícia retornada pelos feeds."}{" "}
+              Clique em <strong>{atualizarLabel}</strong> para tentar de novo.
             </p>
           )}
 
@@ -357,9 +433,9 @@ export function RondaClient({
           </div>
         ) : null}
 
-        {!embedUrl && noticias.length > 0 && (
+        {!embedUrl && noticiasExibidas.length > 0 && (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            {noticias.map((n, i) => (
+            {noticiasExibidas.map((n, i) => (
               <article
                 key={`ronda-${i}-${n.link}`}
                 className="flex flex-col rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
@@ -384,6 +460,11 @@ export function RondaClient({
                     n.titulo
                   )}
                 </h2>
+                {n.destaque ? (
+                  <p className="mt-2 inline-flex w-fit rounded-md bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-900 ring-1 ring-inset ring-amber-200">
+                    {n.destaque}
+                  </p>
+                ) : null}
                 <div className="mt-2 flex items-center gap-2">
                   <FonteLogo fonte={n.fonte} />
                   <p className="text-xs font-medium text-teal-800">{n.fonte}</p>
