@@ -1,9 +1,12 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { agregarTrendsSeo } from "@/lib/trends-seo";
+import {
+  agregarTrendsSeo,
+  type TrendsSeoAgregadoOk,
+} from "@/lib/trends-seo";
 import { TRENDS_SEO_SNAPSHOT_ID } from "@/lib/trends-seo-snapshot";
 
 export type PushTrendsSeoSnapshotResult =
-  | { ok: true; total: number }
+  | { ok: true; total: number; payload: TrendsSeoAgregadoOk }
   | { ok: false; error: string };
 
 function getServiceClient(): SupabaseClient | null {
@@ -26,7 +29,7 @@ export async function pushTrendsSeoSnapshot(): Promise<PushTrendsSeoSnapshotResu
     };
   }
 
-  let payload;
+  let payload: TrendsSeoAgregadoOk;
   try {
     payload = await agregarTrendsSeo();
   } catch (e) {
@@ -38,7 +41,7 @@ export async function pushTrendsSeoSnapshot(): Promise<PushTrendsSeoSnapshotResu
     console.warn(
       "[trends-seo-push-snapshot] 0 itens — snapshot anterior mantido."
     );
-    return { ok: true, total: 0 };
+    return { ok: true, total: 0, payload };
   }
 
   const { error } = await supabase.from("trends_seo_snapshot").upsert(
@@ -54,5 +57,5 @@ export async function pushTrendsSeoSnapshot(): Promise<PushTrendsSeoSnapshotResu
     return { ok: false, error: error.message };
   }
 
-  return { ok: true, total: payload.total };
+  return { ok: true, total: payload.total, payload };
 }
