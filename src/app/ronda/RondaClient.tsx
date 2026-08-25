@@ -112,6 +112,11 @@ type RondaClientProps = {
   atualizarLabel?: string;
   /** Se false, não mostra o botão e só carrega o snapshot ao abrir/trocar aba. */
   showAtualizarButton?: boolean;
+  /**
+   * Se true, o botão grava snapshots RSS (`/api/ronda-rss/push-snapshot`,
+   * equivalente a `npm run ronda:push-snapshot`) e depois relê a aba atual.
+   */
+  pushSnapshotOnAtualizar?: boolean;
   /** Se true, o título do card abre a matéria (sem botão “Ler Matéria”). */
   tituloEhLink?: boolean;
   /** Parágrafo explicativo sob o título (ex.: /ronda-rss sem texto). */
@@ -132,6 +137,7 @@ export function RondaClient({
   autoLoadOnMount = false,
   atualizarLabel = "Atualizar Ronda",
   showAtualizarButton = true,
+  pushSnapshotOnAtualizar = false,
   tituloEhLink = false,
   showHeaderDescription = true,
   showMainNavRow = false,
@@ -219,6 +225,46 @@ export function RondaClient({
       setJaBuscou(true);
     }
   }, [effectiveApiPath]);
+
+  const capturarEAtualizar = useCallback(async () => {
+    setErro(null);
+    setCarregandoLista(true);
+    try {
+      if (pushSnapshotOnAtualizar) {
+        const res = await fetch("/api/ronda-rss/push-snapshot", {
+          method: "POST",
+        });
+        const raw = await res.text();
+        let body: { ok?: boolean; error?: string };
+        try {
+          body = JSON.parse(raw) as typeof body;
+        } catch {
+          const snippet = raw.replace(/\s+/g, " ").slice(0, 120);
+          throw new Error(
+            res.ok
+              ? `Resposta do push não é JSON (${snippet || "vazio"}).`
+              : `Erro ${res.status}: ${snippet || "sem corpo"}.`
+          );
+        }
+        if (!res.ok || body.ok === false) {
+          throw new Error(
+            body.error ?? "Não foi possível gravar o snapshot do radar."
+          );
+        }
+      }
+      // Após o push (ou no refresh simples), relê a aba — refresh=1 evita cache.
+      if (effectiveApiPath) {
+        await atualizarRonda(true);
+      } else {
+        setCarregandoLista(false);
+        setJaBuscou(true);
+      }
+    } catch (e) {
+      setErro(erroParaMensagem(e));
+      setCarregandoLista(false);
+      setJaBuscou(true);
+    }
+  }, [pushSnapshotOnAtualizar, effectiveApiPath, atualizarRonda]);
 
   useEffect(() => {
     if (!tabMode || !activeRoundId) return;
@@ -347,28 +393,35 @@ export function RondaClient({
           </div>
         ) : null}
 
-        {!embedUrl &&
-        (showAtualizarButton || enableTrendsSort || carregandoLista) ? (
+        {((showAtualizarButton && !embedUrl) ||
+          (!embedUrl && (enableTrendsSort || carregandoLista))) ? (
           <div className="mb-8 flex flex-wrap items-center gap-3">
-            {showAtualizarButton ? (
+            {showAtualizarButton && !embedUrl ? (
               <button
                 type="button"
                 disabled={carregandoLista}
                 onClick={() => {
-                  void atualizarRonda(true).catch((e) => {
-                    console.error("[RondaClient] atualizarRonda (botão):", e);
+                  void (pushSnapshotOnAtualizar
+                    ? capturarEAtualizar()
+                    : atualizarRonda(true)
+                  ).catch((e) => {
+                    console.error("[RondaClient] atualizar (botão):", e);
                   });
                 }}
                 className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {carregandoLista ? "Carregando..." : atualizarLabel}
+                {carregandoLista
+                  ? pushSnapshotOnAtualizar
+                    ? "Capturando snapshot…"
+                    : "Carregando..."
+                  : atualizarLabel}
               </button>
             ) : carregandoLista ? (
               <p className="text-sm font-medium text-slate-500" aria-live="polite">
                 Carregando snapshot…
               </p>
             ) : null}
-            {enableTrendsSort ? (
+            {!embedUrl && enableTrendsSort ? (
               <div
                 className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 shadow-sm"
                 role="group"
@@ -402,7 +455,7 @@ export function RondaClient({
         ) : null}
 
         {embedUrl ? (
-          <div className="mb-6">
+          <div className="mb-6 flex flex-wrap items-center gap-3">
             <a
               href={embedUrl}
               target="_blank"
@@ -411,10 +464,20 @@ export function RondaClient({
             >
               Abrir {activeRoundTab?.label ?? "embed"} em nova aba
             </a>
+            {!/^https?:\/\//i.test(embedUrl) ? (
+              <p className="text-sm text-amber-800" role="status">
+                URL do Discover inválida no ambiente (precisa ser http/https).
+                Confira{" "}
+                <code className="rounded bg-amber-50 px-1">
+                  DISCOVER_MONITORING_EMBED_URL
+                </code>
+                .
+              </p>
+            ) : null}
           </div>
         ) : null}
 
-        {erro && !embedUrl ? (
+        {erro ? (
           <div
             className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
             role="alert"
@@ -441,7 +504,7 @@ export function RondaClient({
             </p>
           )}
 
-        {embedUrl ? (
+        {embedUrl && /^https?:\/\//i.test(embedUrl) ? (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <iframe
               title={activeRoundTab?.label ?? "Conteúdo incorporado"}

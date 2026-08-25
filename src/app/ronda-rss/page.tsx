@@ -66,7 +66,8 @@ export default async function RondaRssPage() {
       pageTitle="Radar de Pautas"
       roundTabs={roundTabs}
       autoLoadOnMount
-      showAtualizarButton={false}
+      atualizarLabel="Atualizar Radar de Pautas"
+      pushSnapshotOnAtualizar
       tituloEhLink
       showHeaderDescription={false}
       showPautasAppHeader

@@ -45,4 +45,6 @@ Secrets necessários: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## Página `/ronda-rss` (Radar de Pautas)
 
-Não há botão de atualizar. Ao abrir a página ou trocar de aba, o cliente **lê automaticamente** o último snapshot no Supabase. Conteúdo novo chega quando o crontab (ou a contingência no Actions) grava um snapshot fresco — em geral a cada hora.
+Ao abrir a página ou trocar de aba, o cliente **lê** o último snapshot no Supabase.
+
+O botão **Atualizar Radar de Pautas** grava um snapshot novo (equivalente a `npm run ronda:push-snapshot` via `POST /api/ronda-rss/push-snapshot`) e depois relê a aba atual. Útil enquanto o crontab horário ainda não estiver ativo no servidor.
