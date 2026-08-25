@@ -64,13 +64,14 @@ mkdir -p "$APP_DIR/logs"
 chmod +x "$WRAPPER"
 
 EXISTING="$(crontab -l 2>/dev/null || true)"
-if echo "$EXISTING" | grep -Fq "run-ronda-snapshot.sh"; then
-  echo "==> Cron já configurado (linha existente mantida)."
-  echo "    Se ainda estiver em 3x/dia, atualize manualmente para: $CRON_SCHEDULE"
+# Sempre reaplica o schedule desejado (substitui 3x/dia → horário, etc.).
+FILTERED="$(printf '%s\n' "$EXISTING" | grep -vF "run-ronda-snapshot.sh" || true)"
+if [[ -n "${FILTERED//[[:space:]]/}" ]]; then
+  printf '%s\n%s\n' "$FILTERED" "$CRON_LINE" | crontab -
 else
-  (echo "$EXISTING"; echo "$CRON_LINE") | crontab -
-  echo "==> Cron adicionado: $CRON_SCHEDULE"
+  printf '%s\n' "$CRON_LINE" | crontab -
 fi
+echo "==> Cron instalado/atualizado: $CRON_SCHEDULE"
 
 echo ""
 echo "Pronto. Fonte principal = crontab horário no servidor."

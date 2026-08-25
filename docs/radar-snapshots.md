@@ -12,11 +12,27 @@ No servidor (Mac Mini / Linux), um **crontab** roda **de hora em hora** e execut
 Scripts:
 
 - Wrapper do cron: [`scripts/linux/run-ronda-snapshot.sh`](../scripts/linux/run-ronda-snapshot.sh)
-- Setup (clone, deps, cron): [`scripts/linux/setup-ronda-scraper.sh`](../scripts/linux/setup-ronda-scraper.sh)
+- Só ajustar o horário do cron: [`scripts/linux/ensure-hourly-cron.sh`](../scripts/linux/ensure-hourly-cron.sh)
+- Setup completo (clone, deps, cron): [`scripts/linux/setup-ronda-scraper.sh`](../scripts/linux/setup-ronda-scraper.sh)
 
-Horário padrão no setup: `0 * * * *` (a cada hora, no minuto 0). Logs: `logs/ronda-snapshot.log` no diretório do app.
+Horário padrão: `0 * * * *` (a cada hora, no minuto 0). Logs: `logs/ronda-snapshot.log` no diretório do app.
 
 Requer `.env.local` no servidor com `NEXT_PUBLIC_SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+
+### Quando tiver acesso ao servidor de novo
+
+O banco ainda pode estar no ritmo antigo (3×/dia: 10h, 16h, 19h BRT). Para passar a **hora em hora**:
+
+```bash
+cd ~/app-redacao   # ou o APP_DIR real
+git pull --ff-only
+bash scripts/linux/ensure-hourly-cron.sh
+crontab -l         # deve mostrar: 0 * * * * ... run-ronda-snapshot.sh
+# opcional — gravar um snapshot na hora:
+npm run ronda:push-snapshot && npm run trends:push-snapshot
+```
+
+Isso **substitui** a linha antiga do cron; não precisa editar o crontab à mão.
 
 ## Contingência: GitHub Actions
 
@@ -27,6 +43,6 @@ O workflow [`.github/workflows/ronda-rss-snapshot.yml`](../.github/workflows/ron
 
 Secrets necessários: `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
-## Relação com o botão “Atualizar Radar de Pautas”
+## Página `/ronda-rss` (Radar de Pautas)
 
-Na maior parte das abas, o botão **relê** o snapshot no Supabase (ou tenta live com salvaguardas). Ele **não** substitui o job horário do servidor. Conteúdo novo chega quando o crontab (ou a contingência no Actions) grava um snapshot fresco.
+Não há botão de atualizar. Ao abrir a página ou trocar de aba, o cliente **lê automaticamente** o último snapshot no Supabase. Conteúdo novo chega quando o crontab (ou a contingência no Actions) grava um snapshot fresco — em geral a cada hora.

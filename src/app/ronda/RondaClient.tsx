@@ -110,6 +110,8 @@ type RondaClientProps = {
   autoLoadOnMount?: boolean;
   /** Texto do botão de atualização manual. */
   atualizarLabel?: string;
+  /** Se false, não mostra o botão e só carrega o snapshot ao abrir/trocar aba. */
+  showAtualizarButton?: boolean;
   /** Se true, o título do card abre a matéria (sem botão “Ler Matéria”). */
   tituloEhLink?: boolean;
   /** Parágrafo explicativo sob o título (ex.: /ronda-rss sem texto). */
@@ -129,6 +131,7 @@ export function RondaClient({
   roundTabs,
   autoLoadOnMount = false,
   atualizarLabel = "Atualizar Ronda",
+  showAtualizarButton = true,
   tituloEhLink = false,
   showHeaderDescription = true,
   showMainNavRow = false,
@@ -344,20 +347,27 @@ export function RondaClient({
           </div>
         ) : null}
 
-        {!embedUrl ? (
+        {!embedUrl &&
+        (showAtualizarButton || enableTrendsSort || carregandoLista) ? (
           <div className="mb-8 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled={carregandoLista}
-              onClick={() => {
-                void atualizarRonda(true).catch((e) => {
-                  console.error("[RondaClient] atualizarRonda (botão):", e);
-                });
-              }}
-              className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {carregandoLista ? "Carregando..." : atualizarLabel}
-            </button>
+            {showAtualizarButton ? (
+              <button
+                type="button"
+                disabled={carregandoLista}
+                onClick={() => {
+                  void atualizarRonda(true).catch((e) => {
+                    console.error("[RondaClient] atualizarRonda (botão):", e);
+                  });
+                }}
+                className="rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {carregandoLista ? "Carregando..." : atualizarLabel}
+              </button>
+            ) : carregandoLista ? (
+              <p className="text-sm font-medium text-slate-500" aria-live="polite">
+                Carregando snapshot…
+              </p>
+            ) : null}
             {enableTrendsSort ? (
               <div
                 className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 shadow-sm"
@@ -389,7 +399,9 @@ export function RondaClient({
               </div>
             ) : null}
           </div>
-        ) : (
+        ) : null}
+
+        {embedUrl ? (
           <div className="mb-6">
             <a
               href={embedUrl}
@@ -400,7 +412,7 @@ export function RondaClient({
               Abrir {activeRoundTab?.label ?? "embed"} em nova aba
             </a>
           </div>
-        )}
+        ) : null}
 
         {erro && !embedUrl ? (
           <div
@@ -417,8 +429,15 @@ export function RondaClient({
           noticiasExibidas.length === 0 && (
             <p className="rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-12 text-center text-sm text-slate-500">
               {activeRoundTab?.emptyLabel ??
-                "Nenhuma notícia retornada pelos feeds."}{" "}
-              Clique em <strong>{atualizarLabel}</strong> para tentar de novo.
+                "Nenhuma notícia retornada pelos feeds."}
+              {showAtualizarButton ? (
+                <>
+                  {" "}
+                  Clique em <strong>{atualizarLabel}</strong> para tentar de novo.
+                </>
+              ) : (
+                <> Recarregue a página para tentar de novo.</>
+              )}
             </p>
           )}
 
