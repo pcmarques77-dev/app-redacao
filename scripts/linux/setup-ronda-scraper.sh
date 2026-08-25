@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
-# Configura o Mac Mini / servidor Linux para atualizar snapshots RSS no Supabase.
+# Configura o servidor Linux / Mac Mini como fonte PRINCIPAL dos snapshots
+# do Radar de Pautas (RSS + Trends) no Supabase.
+#
+# Ver docs/radar-snapshots.md — GitHub Actions é só contingência.
+#
 # Uso (no servidor, após git clone):
 #   bash scripts/linux/setup-ronda-scraper.sh
 #
 # Depois edite ~/app-redacao/.env.local com as chaves Supabase e rode:
-#   npm run ronda:push-snapshot
+#   npm run ronda:push-snapshot && npm run trends:push-snapshot
 
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-$HOME/app-redacao}"
 REPO_URL="${REPO_URL:-https://github.com/pcmarques77-dev/app-redacao.git}"
-CRON_SCHEDULE="${CRON_SCHEDULE:-0 10,16,22 * * *}"  # ~07h, 13h, 19h BRT
+# Padrão produção: a cada hora (minuto 0). Sobrescreva com CRON_SCHEDULE=... se precisar.
+CRON_SCHEDULE="${CRON_SCHEDULE:-0 * * * *}"
 
 echo "==> Diretório: $APP_DIR"
 
@@ -48,8 +53,9 @@ EOF
   exit 0
 fi
 
-echo "==> Testando push de snapshot..."
+echo "==> Testando push de snapshots (RSS + Trends)..."
 npm run ronda:push-snapshot
+npm run trends:push-snapshot
 
 WRAPPER="$APP_DIR/scripts/linux/run-ronda-snapshot.sh"
 CRON_LINE="$CRON_SCHEDULE cd $APP_DIR && $WRAPPER >> $APP_DIR/logs/ronda-snapshot.log 2>&1"
@@ -59,12 +65,14 @@ chmod +x "$WRAPPER"
 
 EXISTING="$(crontab -l 2>/dev/null || true)"
 if echo "$EXISTING" | grep -Fq "run-ronda-snapshot.sh"; then
-  echo "==> Cron já configurado."
+  echo "==> Cron já configurado (linha existente mantida)."
+  echo "    Se ainda estiver em 3x/dia, atualize manualmente para: $CRON_SCHEDULE"
 else
   (echo "$EXISTING"; echo "$CRON_LINE") | crontab -
   echo "==> Cron adicionado: $CRON_SCHEDULE"
 fi
 
 echo ""
-echo "Pronto. Logs em: $APP_DIR/logs/ronda-snapshot.log"
-echo "Teste manual: npm run ronda:push-snapshot"
+echo "Pronto. Fonte principal = crontab horário no servidor."
+echo "Logs em: $APP_DIR/logs/ronda-snapshot.log"
+echo "Teste manual: npm run ronda:push-snapshot && npm run trends:push-snapshot"

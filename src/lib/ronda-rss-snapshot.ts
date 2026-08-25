@@ -36,7 +36,7 @@ function createAdmin() {
   return createClient(url, key);
 }
 
-/** Lê o snapshot gravado pelo scraper no Linux (`ronda_rss_snapshot`). */
+/** Lê o snapshot gravado pelo crontab horário no servidor (`ronda_rss_snapshot`). Ver docs/radar-snapshots.md. */
 export async function readRondaRssSnapshotFromDb(
   kind: RondaRssKind = "gov"
 ): Promise<RondaRssAgregadoOk | null> {

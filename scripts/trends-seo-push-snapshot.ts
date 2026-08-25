@@ -1,5 +1,6 @@
 /**
  * Grava agregação Google Trends BR em `trends_seo_snapshot`.
+ * Fonte principal: crontab horário no servidor (docs/radar-snapshots.md).
  *
  *   npm run trends:push-snapshot
  */

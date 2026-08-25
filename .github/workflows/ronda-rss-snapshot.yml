@@ -1,5 +1,8 @@
-# Atualiza snapshots do Radar de Pautas no Supabase (RSS + Trends SEO).
-# Necessário para Ronda INSS/Longevidade (Google Notícias) e fallback do Trends.
+# Contingência: atualiza snapshots do Radar de Pautas (RSS + Trends SEO) no Supabase.
+#
+# Fonte principal: crontab horário no servidor (ver docs/radar-snapshots.md e
+# scripts/linux/). Este workflow é para indisponibilidade temporária do servidor.
+# Dispare manualmente em Actions → Run workflow. Não use como rotina diária.
 #
 # Secrets em Settings → Secrets and variables → Actions:
 #   NEXT_PUBLIC_SUPABASE_URL
@@ -8,10 +11,10 @@
 name: Radar RSS snapshots
 
 on:
-  schedule:
-    # 07:00, 13:00 e 19:00 em Brasília (UTC-3)
-    - cron: "0 10,16,22 * * *"
   workflow_dispatch:
+  # Contingência prolongada (servidor fora do ar): descomente e ajuste o horário.
+  # schedule:
+  #   - cron: "0 * * * *"
 
 concurrency:
   group: ronda-rss-snapshot

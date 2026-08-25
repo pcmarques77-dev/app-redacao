@@ -45,7 +45,7 @@ function createAdmin() {
   return createClient(url, key);
 }
 
-/** Lê o snapshot gravado pelo job (`trends_seo_snapshot`). */
+/** Lê o snapshot gravado pelo crontab horário no servidor (`trends_seo_snapshot`). Ver docs/radar-snapshots.md. */
 export async function readTrendsSeoSnapshotFromDb(): Promise<TrendsSeoAgregadoOk | null> {
   const supabase = createAdmin();
   if (!supabase) return null;

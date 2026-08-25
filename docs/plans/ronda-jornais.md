@@ -17,7 +17,7 @@ Nova aba **Ronda Jornais** no Radar de Pautas (`/ronda-rss`): concentrar **manch
 
 1. RSS estável: CNN (`https://admin.cnnbrasil.com.br/feed/`), Metrópoles, G1, O Globo, Terra, seções Estadão que respondem bem, etc.
 2. Scraping (Cheerio, padrão de `feeds-governo.ts` / Radar Old) só para sites sem RSS útil ou instável (ex.: Folha/UOL/alguns Estadão).
-3. Snapshot Supabase (`ronda_rss_snapshot`, **id=5** já existe no projeto remoto com payload vazio — reutilizar) + push via Mac Mini / GitHub Actions, no mesmo fluxo das outras rondas.
+3. Snapshot Supabase (`ronda_rss_snapshot`, **id=5** já existe no projeto remoto com payload vazio — reutilizar) + push via **crontab horário no servidor** (mesmo fluxo das outras rondas; GitHub Actions só como contingência — ver [`docs/radar-snapshots.md`](../radar-snapshots.md)).
 
 Evitar scraping de *todos* os sites como estratégia principal (HTML frágil, WAF, custo operacional).
 
@@ -50,7 +50,7 @@ Evitar scraping de *todos* os sites como estratégia principal (HTML frágil, WA
 3. API [`src/app/api/ronda-rss/route.ts`](../src/app/api/ronda-rss/route.ts): `kind=jornais` + caches.
 4. UI [`src/app/ronda-rss/page.tsx`](../src/app/ronda-rss/page.tsx): aba “Ronda Jornais”.
 5. Logos em [`src/lib/fonte-logos.ts`](../src/lib/fonte-logos.ts).
-6. Para fontes sem RSS: scrapers dedicados + job no Mac Mini.
+6. Para fontes sem RSS: scrapers dedicados + job no servidor (crontab horário).
 7. Validar push de snapshot (`npm run ronda:push-snapshot`) e a aba com duas sessões / refresh.
 
 ## Lições do protótipo (2026-07-22, descartado)

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Wrapper para cron — carrega nvm (se existir) e roda o push de snapshots.
+# Wrapper para cron (fonte principal dos snapshots — docs/radar-snapshots.md).
+# Carrega nvm (se existir) e grava RSS + Trends no Supabase.
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -13,3 +14,4 @@ fi
 
 export PATH="$APP_DIR/node_modules/.bin:$PATH"
 npm run ronda:push-snapshot
+npm run trends:push-snapshot
