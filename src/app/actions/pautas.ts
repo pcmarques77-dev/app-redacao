@@ -15,7 +15,10 @@ import {
   type PautaStatus,
   type UpdatePautaPatch,
 } from "@/lib/pautas-shared";
-import { filterUsuariosForSelects } from "@/lib/usuarios-select";
+import {
+  filterUsuariosForSelects,
+  reporterNomeVisivel,
+} from "@/lib/usuarios-select";
 
 const UPDATE_KEYS = new Set([
   "titulo_provisorio",
@@ -115,7 +118,7 @@ export async function listReportersForSessionAction(): Promise<
 
   const { data, error } = await admin
     .from("usuarios")
-    .select("id, nome")
+    .select("id, nome, email")
     .order("nome", { ascending: true });
 
   if (error) {
@@ -123,7 +126,9 @@ export async function listReportersForSessionAction(): Promise<
   }
   return {
     ok: true,
-    rows: filterUsuariosForSelects((data ?? []) as ReporterOptionRow[]),
+    rows: filterUsuariosForSelects(
+      (data ?? []) as (ReporterOptionRow & { email?: string | null })[]
+    ).map(({ id, nome }) => ({ id, nome })),
   };
 }
 
@@ -154,7 +159,7 @@ export async function listPautasDashboardAction(): Promise<
         status,
         reporter_id,
         demanda_multimidia,
-        reporter:usuarios!pautas_reporter_id_fkey(nome)
+        reporter:usuarios!pautas_reporter_id_fkey(nome, email)
       `
     )
     .eq("hard_news", false)
@@ -166,7 +171,9 @@ export async function listPautasDashboardAction(): Promise<
   }
   const { data, error } = await q;
   if (error) return { ok: false, error: error.message };
-  const rows = ((data ?? []) as unknown as PautaDashboardRow[]).map((row) => {
+  const rows = ((data ?? []) as unknown as (PautaDashboardRow & {
+    reporter?: { nome: string | null; email?: string | null } | null;
+  })[]).map((row) => {
     const rawStatus =
       typeof row.status === "string" || row.status === null
         ? row.status
@@ -174,6 +181,7 @@ export async function listPautasDashboardAction(): Promise<
     const rawDm = (row as { demanda_multimidia?: unknown }).demanda_multimidia;
     return {
       ...row,
+      reporter: reporterNomeVisivel(row.reporter),
       status: coercePautaStatus(rawStatus),
       demanda_multimidia: rawDm === true,
     };
@@ -218,7 +226,7 @@ export async function listHardNewsQueueAction(): Promise<
         status,
         reporter_id,
         data_criacao,
-        reporter:usuarios!pautas_reporter_id_fkey(nome)
+        reporter:usuarios!pautas_reporter_id_fkey(nome, email)
       `
     )
     .eq("hard_news", true)
@@ -227,13 +235,16 @@ export async function listHardNewsQueueAction(): Promise<
 
   if (error) return { ok: false, error: error.message };
 
-  const rows = ((data ?? []) as unknown as HardNewsQueueRow[]).map((row) => {
+  const rows = ((data ?? []) as unknown as (HardNewsQueueRow & {
+    reporter?: { nome: string | null; email?: string | null } | null;
+  })[]).map((row) => {
     const rawStatus =
       typeof row.status === "string" || row.status === null
         ? row.status
         : null;
     return {
       ...row,
+      reporter: reporterNomeVisivel(row.reporter),
       status: coercePautaStatus(rawStatus),
     };
   });
@@ -443,10 +454,11 @@ export async function createPautaAction(
   if (demanda_multimidia) {
     const { data: repRow } = await admin
       .from("usuarios")
-      .select("nome")
+      .select("nome, email")
       .eq("id", reporter_id)
       .maybeSingle();
-    const reporterNome = repRow?.nome?.trim() || "—";
+    const reporterNome =
+      reporterNomeVisivel(repRow)?.nome?.trim() || "—";
     await notifyEditorsDemandaMultimidia(admin, {
       titulo: titulo,
       reporterNome,
@@ -529,7 +541,7 @@ export async function updatePautaAction(
     const { data: pRow } = await admin
       .from("pautas")
       .select(
-        "titulo_provisorio, fontes, reporter:usuarios!pautas_reporter_id_fkey(nome)"
+        "titulo_provisorio, fontes, reporter:usuarios!pautas_reporter_id_fkey(nome, email)"
       )
       .eq("id", pautaId)
       .maybeSingle();
@@ -538,9 +550,12 @@ export async function updatePautaAction(
       const titulo = (pRow as { titulo_provisorio?: string | null })
         .titulo_provisorio?.trim() || "Sem título";
       const resumo = (pRow as { fontes?: string | null }).fontes ?? null;
-      const rep = (pRow as { reporter?: { nome?: string | null } | null })
-        .reporter;
-      const reporterNome = rep?.nome?.trim() || "—";
+      const rep = (
+        pRow as {
+          reporter?: { nome?: string | null; email?: string | null } | null;
+        }
+      ).reporter;
+      const reporterNome = reporterNomeVisivel(rep)?.nome?.trim() || "—";
       await notifyEditorsDemandaMultimidia(admin, {
         titulo,
         reporterNome,

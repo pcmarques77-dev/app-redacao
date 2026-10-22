@@ -21,6 +21,8 @@ import {
 } from "@/lib/admin-acl";
 import { isAgendaTipo, isNotasTipo, isStreamyardTipo } from "@/lib/escala-constants";
 import { loadDashboardAction } from "@/app/actions/dashboard";
+import { loadAgendasMinistrosAction } from "@/app/actions/agendas-ministros";
+import type { AgendaMinistroCard } from "@/lib/eagendas";
 import {
   listEscalasForDashboardAction,
   moveAgendaToDateAction,
@@ -452,6 +454,7 @@ function PautasCalendar({
   onNextWeek,
   pautasPorDia,
   escalas,
+  agendasMinistros,
   onDropDeadline,
   onDropStreamyard,
   onDropNota,
@@ -459,6 +462,7 @@ function PautasCalendar({
   controlsContent,
   onDayClick,
   onEscalaCardClick,
+  onMinistroClick,
   onPautaChipClick,
   onPautaStatusChange,
   canManageDeadlineForPauta,
@@ -476,6 +480,7 @@ function PautasCalendar({
   onNextWeek: () => void;
   pautasPorDia: Map<string, PautaRow[]>;
   escalas: EscalaRow[];
+  agendasMinistros: AgendaMinistroCard[];
   onDropDeadline: (pautaId: string, targetDayYmd: string) => void | Promise<void>;
   onDropStreamyard?: (
     escalaId: string,
@@ -492,6 +497,7 @@ function PautasCalendar({
   controlsContent?: ReactNode;
   onDayClick?: (dayYmd: string) => void;
   onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
+  onMinistroClick?: (agenda: AgendaMinistroCard) => void;
   onPautaChipClick?: (p: PautaRow) => void;
   onPautaStatusChange?: (pautaId: string, status: PautaStatus) => void | Promise<void>;
   canManageDeadlineForPauta?: (p: PautaRow) => boolean;
@@ -669,6 +675,7 @@ function PautasCalendar({
     | { tipo: "plantao"; escala: EscalaRow }
     | { tipo: "streamyard"; escala: EscalaRow }
     | { tipo: "agenda"; escala: EscalaRow }
+    | { tipo: "ministro"; agenda: AgendaMinistroCard }
     | { tipo: "nota"; escala: EscalaRow }
     | { tipo: "pauta"; pauta: PautaRow }
     | { tipo: "ferias"; escala: EscalaRow };
@@ -678,9 +685,10 @@ function PautasCalendar({
     plantao: 2,
     streamyard: 3,
     agenda: 4,
-    nota: 5,
-    pauta: 6,
-    ferias: 7,
+    ministro: 5,
+    nota: 6,
+    pauta: 7,
+    ferias: 8,
   };
 
   const calendarioDiaItemMinutes = (item: CalendarioDiaItem): number | null => {
@@ -690,11 +698,17 @@ function PautasCalendar({
     if (item.tipo === "pauta") {
       return deadlineTimeOfDayMinutes(item.pauta.deadline);
     }
+    if (item.tipo === "ministro") {
+      return plantaoHorarioStartMinutes(item.agenda.horaInicio);
+    }
     return null;
   };
 
-  const calendarioDiaItemTieBreakId = (item: CalendarioDiaItem): string =>
-    item.tipo === "pauta" ? item.pauta.id : item.escala.id;
+  const calendarioDiaItemTieBreakId = (item: CalendarioDiaItem): string => {
+    if (item.tipo === "pauta") return item.pauta.id;
+    if (item.tipo === "ministro") return item.agenda.id;
+    return item.escala.id;
+  };
 
   const getCalendarioDiaItens = (dayKey: string): CalendarioDiaItem[] => {
     const items: CalendarioDiaItem[] = [];
@@ -726,6 +740,14 @@ function PautasCalendar({
       }
     }
 
+    for (const agenda of agendasMinistros) {
+      const ini = agenda.dataInicio?.trim() ?? "";
+      const fim = agenda.dataFim?.trim() || ini;
+      if (dayYmdInFeriasRange(dayKey, ini, fim)) {
+        items.push({ tipo: "ministro", agenda });
+      }
+    }
+
     for (const e of escalas) {
       if (isNotasTipo(e.tipo) && e.data_inicio?.trim() === dayKey) {
         items.push({ tipo: "nota", escala: e });
@@ -745,7 +767,7 @@ function PautasCalendar({
       }
     }
 
-    // Ordem fixa: Feriado → Plantão → Streamyard → Agenda → Notas → Pautas → Férias.
+    // Ordem fixa: Feriado → Plantão → Streamyard → Agenda → Ministros → Notas → Pautas → Férias.
     return items.sort((a, b) => {
       const tipoDiff =
         CAL_EVENT_ORDER[a.tipo] - CAL_EVENT_ORDER[b.tipo];
@@ -814,7 +836,9 @@ function PautasCalendar({
           const key =
             item.tipo === "pauta"
               ? `pauta-${item.pauta.id}`
-              : `${item.tipo}-${item.escala.id}`;
+              : item.tipo === "ministro"
+                ? `ministro-${item.agenda.id}`
+                : `${item.tipo}-${item.escala.id}`;
 
           if (item.tipo === "feriado") {
             const e = item.escala;
@@ -948,6 +972,35 @@ function PautasCalendar({
                 <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
                   {agendaEditoria(e)}
                 </span>
+              </button>
+            );
+          }
+
+          if (item.tipo === "ministro") {
+            const agenda = item.agenda;
+            const hora = [agenda.horaInicio, agenda.horaFim]
+              .filter((part): part is string => Boolean(part?.trim()))
+              .join("–");
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  onMinistroClick?.(agenda);
+                }}
+                className="block w-full cursor-pointer rounded border border-indigo-300 bg-indigo-50 px-1.5 py-1 text-left text-[11px] font-medium leading-snug text-indigo-950 shadow-sm transition hover:bg-indigo-100 hover:ring-2 hover:ring-indigo-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-indigo-500"
+              >
+                <span className="block font-semibold">{agenda.tipoRegistro}</span>
+                <span className="line-clamp-2">{agenda.assunto}</span>
+                <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
+                  {agenda.ministroNome}
+                </span>
+                {hora ? (
+                  <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
+                    {hora}
+                  </span>
+                ) : null}
               </button>
             );
           }
@@ -1326,6 +1379,11 @@ export function PautasDashboard({
   const router = useRouter();
   const [pautas, setPautas] = useState<PautaRow[]>([]);
   const [escalas, setEscalas] = useState<EscalaRow[]>([]);
+  const [agendasMinistros, setAgendasMinistros] = useState<AgendaMinistroCard[]>(
+    []
+  );
+  const [ministroDetalhe, setMinistroDetalhe] =
+    useState<AgendaMinistroCard | null>(null);
   const [usuariosFiltro, setUsuariosFiltro] = useState<ModalReporterOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1672,6 +1730,7 @@ export function PautasDashboard({
         ok: true;
         pautas: PautaRow[];
         escalas: EscalaRow[];
+        agendasMinistros: AgendaMinistroCard[];
         usuarios: ModalReporterOption[];
         session: {
           userId: string;
@@ -1695,6 +1754,7 @@ export function PautasDashboard({
       ok: true,
       pautas: res.pautas as PautaRow[],
       escalas: (res.escalas ?? []) as unknown as EscalaRow[],
+      agendasMinistros: res.agendasMinistros ?? [],
       usuarios: (res.reporters ?? []) as ModalReporterOption[],
       session: {
         userId: res.session.userId,
@@ -1715,11 +1775,13 @@ export function PautasDashboard({
       setError(res.error);
       setPautas([]);
       setEscalas([]);
+      setAgendasMinistros([]);
       setUsuariosFiltro([]);
       setSessionCtx(null);
     } else {
       setPautas(res.pautas);
       setEscalas(res.escalas);
+      setAgendasMinistros(res.agendasMinistros);
       setUsuariosFiltro(res.usuarios);
       setSessionCtx(res.session);
     }
@@ -1738,6 +1800,7 @@ export function PautasDashboard({
     }
     setPautas(res.pautas);
     setEscalas(res.escalas);
+    setAgendasMinistros(res.agendasMinistros);
     setUsuariosFiltro(res.usuarios);
     setSessionCtx(res.session);
   }, [fetchDashboardData]);
@@ -1790,10 +1853,23 @@ export function PautasDashboard({
       if (cancelled || !res.ok) return;
       setEscalas((res.rows ?? []) as unknown as EscalaRow[]);
     });
+    void loadAgendasMinistrosAction(escalaQueryInput).then((res) => {
+      if (cancelled || !res.ok) return;
+      setAgendasMinistros(res.rows);
+    });
     return () => {
       cancelled = true;
     };
   }, [escalaQueryInput]);
+
+  useEffect(() => {
+    if (!ministroDetalhe) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMinistroDetalhe(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ministroDetalhe]);
 
   useEffect(() => {
     if (!sessionCtx || privilegedSession) return;
@@ -2812,6 +2888,7 @@ export function PautasDashboard({
               }
               pautasPorDia={pautasPorDia}
               escalas={escalas}
+              agendasMinistros={agendasMinistros}
               onDropDeadline={handleCalendarDeadlineDrop}
               onDropStreamyard={handleCalendarStreamyardDrop}
               onDropNota={handleCalendarNotaDrop}
@@ -2819,6 +2896,7 @@ export function PautasDashboard({
               controlsContent={controlsLinha}
               onDayClick={handleCalendarDayClick}
               onEscalaCardClick={handleEscalaCardClick}
+              onMinistroClick={setMinistroDetalhe}
               onPautaChipClick={handleCalendarioPautaChipClick}
               onPautaStatusChange={handleCalendarStatusChange}
               canManageDeadlineForPauta={canManagePauta}
@@ -3287,6 +3365,123 @@ export function PautasDashboard({
                 />
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {ministroDetalhe && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setMinistroDetalhe(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ministro-agenda-titulo"
+            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h2
+                id="ministro-agenda-titulo"
+                className="text-lg font-semibold text-slate-900"
+              >
+                {ministroDetalhe.tipoRegistro}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setMinistroDetalhe(null)}
+                className="shrink-0 rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+                aria-label="Fechar"
+              >
+                ×
+              </button>
+            </div>
+            <p className="mt-3 text-sm text-slate-600">
+              Compromisso público do e-Agendas. Só é possível consultar.
+            </p>
+            <dl className="mt-4 space-y-3 text-sm">
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Assunto
+                </dt>
+                <dd className="mt-0.5 text-slate-900">{ministroDetalhe.assunto}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Ministro
+                </dt>
+                <dd className="mt-0.5 text-slate-900">
+                  {ministroDetalhe.ministroNome}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Cargo
+                </dt>
+                <dd className="mt-0.5 text-slate-800">
+                  {ministroDetalhe.cargo?.trim() || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Órgão
+                </dt>
+                <dd className="mt-0.5 text-slate-800">
+                  {ministroDetalhe.orgao?.trim() || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Data
+                </dt>
+                <dd className="mt-0.5 text-slate-800">
+                  {ministroDetalhe.dataFim &&
+                  ministroDetalhe.dataFim !== ministroDetalhe.dataInicio
+                    ? `${formatDeadlinePtBR(ministroDetalhe.dataInicio)} – ${formatDeadlinePtBR(ministroDetalhe.dataFim)}`
+                    : formatDeadlinePtBR(ministroDetalhe.dataInicio)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Horário
+                </dt>
+                <dd className="mt-0.5 text-slate-800">
+                  {[ministroDetalhe.horaInicio, ministroDetalhe.horaFim]
+                    .filter((part) => part?.trim())
+                    .join(" – ") || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Local
+                </dt>
+                <dd className="mt-0.5 text-slate-800">
+                  {ministroDetalhe.local?.trim() || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Participantes
+                </dt>
+                <dd className="mt-0.5 whitespace-pre-wrap text-slate-800">
+                  {ministroDetalhe.participantes?.trim() || "—"}
+                </dd>
+              </div>
+            </dl>
+            {ministroDetalhe.url ? (
+              <a
+                href={ministroDetalhe.url}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-5 inline-flex text-sm font-medium text-blue-700 underline-offset-2 hover:underline"
+              >
+                Ver no e-Agendas
+              </a>
+            ) : null}
           </div>
         </div>
       )}

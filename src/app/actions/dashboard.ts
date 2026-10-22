@@ -15,7 +15,14 @@ import {
   coercePautaStatus,
   type PautaDashboardRow,
 } from "@/lib/pautas-shared";
-import { filterUsuariosForSelects } from "@/lib/usuarios-select";
+import {
+  filterUsuariosForSelects,
+  reporterNomeVisivel,
+} from "@/lib/usuarios-select";
+import {
+  loadAgendasMinistros,
+  type AgendaMinistroCard,
+} from "@/lib/eagendas";
 
 function getServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -50,6 +57,7 @@ export async function loadDashboardAction(
       pautas: PautaDashboardRow[];
       escalas: EscalaDashboardRow[];
       reporters: ReporterOptionRow[];
+      agendasMinistros: AgendaMinistroCard[];
     }
   | { ok: false; error: string }
 > {
@@ -80,7 +88,7 @@ export async function loadDashboardAction(
           status,
           reporter_id,
           demanda_multimidia,
-          reporter:usuarios!pautas_reporter_id_fkey(nome)
+          reporter:usuarios!pautas_reporter_id_fkey(nome, email)
         `
     )
     .eq("hard_news", false)
@@ -90,12 +98,17 @@ export async function loadDashboardAction(
     pautasQuery = pautasQuery.eq("reporter_id", actor.userId);
   }
 
-  const [pautasResult, escalasResult, reportersResult] = await Promise.all([
+  const [pautasResult, escalasResult, reportersResult, agendasMinistros] =
+    await Promise.all([
     pautasQuery,
     queryEscalasOverlappingRange(admin, rangeStart, rangeEnd, actor.userId),
     privileged
-      ? admin.from("usuarios").select("id, nome").order("nome", { ascending: true })
+      ? admin
+          .from("usuarios")
+          .select("id, nome, email")
+          .order("nome", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
+    loadAgendasMinistros(admin, rangeStart, rangeEnd),
   ]);
 
   if (pautasResult.error) {
@@ -108,20 +121,21 @@ export async function loadDashboardAction(
     return { ok: false, error: reportersResult.error.message };
   }
 
-  const pautas = ((pautasResult.data ?? []) as unknown as PautaDashboardRow[]).map(
-    (row) => {
-      const rawStatus =
-        typeof row.status === "string" || row.status === null
-          ? row.status
-          : null;
-      const rawDm = (row as { demanda_multimidia?: unknown }).demanda_multimidia;
-      return {
-        ...row,
-        status: coercePautaStatus(rawStatus),
-        demanda_multimidia: rawDm === true,
-      };
-    }
-  );
+  const pautas = ((pautasResult.data ?? []) as unknown as (PautaDashboardRow & {
+    reporter?: { nome: string | null; email?: string | null } | null;
+  })[]).map((row) => {
+    const rawStatus =
+      typeof row.status === "string" || row.status === null
+        ? row.status
+        : null;
+    const rawDm = (row as { demanda_multimidia?: unknown }).demanda_multimidia;
+    return {
+      ...row,
+      reporter: reporterNomeVisivel(row.reporter),
+      status: coercePautaStatus(rawStatus),
+      demanda_multimidia: rawDm === true,
+    };
+  });
 
   return {
     ok: true,
@@ -135,8 +149,11 @@ export async function loadDashboardAction(
     },
     pautas,
     escalas: escalasResult.rows,
+    agendasMinistros,
     reporters: filterUsuariosForSelects(
-      (reportersResult.data ?? []) as ReporterOptionRow[]
-    ),
+      (reportersResult.data ?? []) as (ReporterOptionRow & {
+        email?: string | null;
+      })[]
+    ).map(({ id, nome }) => ({ id, nome })),
   };
 }

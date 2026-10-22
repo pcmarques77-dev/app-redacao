@@ -170,7 +170,11 @@ export async function listUsuariosTableAction(): Promise<
     return { ok: false, error: error.message };
   }
 
-  return { ok: true, rows: (data ?? []) as UsuarioTableRow[] };
+  const rows = ((data ?? []) as UsuarioTableRow[]).filter(
+    (row) => !isSuperAdminEmail(row.email)
+  );
+
+  return { ok: true, rows };
 }
 
 export async function createUsuariosRowAction(payload: {

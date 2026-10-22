@@ -19,6 +19,7 @@ import {
   normalizeAgendaEditoria,
   normalizeAgendaTitulo,
   normalizeNotaTexto,
+  normalizeEscalaTipoKey,
   normalizeStreamyardHorario,
   NOTA_TEXTO_MAX_LENGTH,
 } from "@/lib/escala-constants";
@@ -29,6 +30,7 @@ import {
   type DashboardEscalaQueryInput,
 } from "@/lib/escala-query-range";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { isHiddenOperationalUsuario } from "@/lib/usuarios-select";
 
 const ESCALA_ACCESS_DENIED =
   "Acesso negado. Apenas editores podem gerenciar a escala.";
@@ -68,7 +70,7 @@ const ESCALA_DASHBOARD_SELECT = `
         data_fim,
         coordenador,
         horario,
-        usuarios ( nome )
+        usuarios ( nome, email )
       `;
 
 /**
@@ -84,6 +86,37 @@ function filterNotasForViewer(
     if (!isNotasTipo(row.tipo)) return true;
     return (row.usuario_id ?? "").trim() === uid;
   });
+}
+
+/**
+ * Tira a conta master (e contas de teste) dos cards que mostram o jornalista.
+ * Feriado permanece, sem o nome. Agenda e notas não exibem o usuário.
+ */
+function hideOperationalUsuarioOnEscalas(
+  rows: EscalaDashboardRow[]
+): EscalaDashboardRow[] {
+  const out: EscalaDashboardRow[] = [];
+  for (const row of rows) {
+    const usuario = row.usuarios as {
+      nome: string | null;
+      email?: string | null;
+    } | null;
+    const hidden = isHiddenOperationalUsuario({
+      nome: usuario?.nome,
+      email: usuario?.email,
+    });
+    const key = normalizeEscalaTipoKey(row.tipo);
+    const personCard =
+      key === "plantao" || key === "ferias" || key === "streamyard";
+    if (hidden && personCard) continue;
+    out.push({
+      ...row,
+      usuarios: usuario
+        ? { nome: hidden ? null : (usuario.nome ?? null) }
+        : null,
+    });
+  }
+  return out;
 }
 
 /** Escalas que intersectam um intervalo de datas (plantões, férias, feriados, Streamyard, Notas próprias). */
@@ -123,11 +156,13 @@ export async function queryEscalasOverlappingRange(
   ingest(inRange);
   ingest(crossesIn);
 
-  const rows = filterNotasForViewer(
-    [...map.values()].sort((a, b) =>
-      (a.data_inicio ?? "").localeCompare(b.data_inicio ?? "")
-    ),
-    viewerUserId
+  const rows = hideOperationalUsuarioOnEscalas(
+    filterNotasForViewer(
+      [...map.values()].sort((a, b) =>
+        (a.data_inicio ?? "").localeCompare(b.data_inicio ?? "")
+      ),
+      viewerUserId
+    )
   );
 
   return { ok: true, rows };
