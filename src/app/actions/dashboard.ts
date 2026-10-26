@@ -19,10 +19,6 @@ import {
   filterUsuariosForSelects,
   reporterNomeVisivel,
 } from "@/lib/usuarios-select";
-import {
-  loadAgendasMinistros,
-  type AgendaMinistroCard,
-} from "@/lib/eagendas";
 
 function getServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -45,8 +41,8 @@ export type LoadDashboardSession = {
 };
 
 /**
- * Carrega sessão, pautas, escalas (intervalo do calendário) e repórteres em uma única
- * ida ao servidor — um `getAdminActor()` e queries em paralelo.
+ * Carrega sessão, pautas, escalas (intervalo do calendário) e repórteres em uma
+ * única ida ao servidor — um `getAdminActor()` e queries em paralelo.
  */
 export async function loadDashboardAction(
   input: LoadDashboardInput
@@ -57,7 +53,6 @@ export async function loadDashboardAction(
       pautas: PautaDashboardRow[];
       escalas: EscalaDashboardRow[];
       reporters: ReporterOptionRow[];
-      agendasMinistros: AgendaMinistroCard[];
     }
   | { ok: false; error: string }
 > {
@@ -98,8 +93,7 @@ export async function loadDashboardAction(
     pautasQuery = pautasQuery.eq("reporter_id", actor.userId);
   }
 
-  const [pautasResult, escalasResult, reportersResult, agendasMinistros] =
-    await Promise.all([
+  const [pautasResult, escalasResult, reportersResult] = await Promise.all([
     pautasQuery,
     queryEscalasOverlappingRange(admin, rangeStart, rangeEnd, actor.userId),
     privileged
@@ -108,7 +102,6 @@ export async function loadDashboardAction(
           .select("id, nome, email")
           .order("nome", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
-    loadAgendasMinistros(admin, rangeStart, rangeEnd),
   ]);
 
   if (pautasResult.error) {
@@ -149,7 +142,6 @@ export async function loadDashboardAction(
     },
     pautas,
     escalas: escalasResult.rows,
-    agendasMinistros,
     reporters: filterUsuariosForSelects(
       (reportersResult.data ?? []) as (ReporterOptionRow & {
         email?: string | null;

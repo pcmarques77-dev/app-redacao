@@ -2,7 +2,7 @@
 export const CALENDARIO_PAUTAS_PATH = "/";
 
 /** sessionStorage — estado do calendário/lista no painel (`PautasDashboard`). */
-export const DASHBOARD_CAL_STORAGE_KEY = "pautas-dashboard-cal-v1";
+export const DASHBOARD_CAL_STORAGE_KEY = "pautas-dashboard-cal-v3";
 
 /** Disparado ao clicar no logo estando já em `/` — força vista Calendário. */
 export const PAUTAS_DASHBOARD_HOME_EVENT = "pautas-dashboard-home";

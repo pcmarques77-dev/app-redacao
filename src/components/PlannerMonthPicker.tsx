@@ -8,6 +8,8 @@ type PlannerMonthPickerProps = {
   yearMin: number;
   yearMax: number;
   onCommit: (year: number, monthIndex: number) => void;
+  /** Se definido, substitui o rótulo “mês de ano” no botão. */
+  triggerLabel?: string;
 };
 
 export function PlannerMonthPicker({
@@ -16,6 +18,7 @@ export function PlannerMonthPicker({
   yearMin,
   yearMax,
   onCommit,
+  triggerLabel: triggerLabelProp,
 }: PlannerMonthPickerProps) {
   const [open, setOpen] = useState(false);
   const [viewYear, setViewYear] = useState(year);
@@ -44,10 +47,11 @@ export function PlannerMonthPicker({
     return () => window.removeEventListener("mousedown", onPointer);
   }, [open]);
 
-  const triggerLabel =
+  const monthYearLabel =
     new Date(year, monthIndex, 1)
       .toLocaleDateString("pt-BR", { month: "long", year: "numeric" })
       .replace(/^\w/, (c) => c.toUpperCase());
+  const triggerLabel = triggerLabelProp?.trim() || monthYearLabel;
 
   const monthLabels = Array.from({ length: 12 }, (_, mi) =>
     new Date(2000, mi, 1).toLocaleDateString("pt-BR", { month: "short" })

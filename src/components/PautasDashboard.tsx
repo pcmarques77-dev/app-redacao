@@ -21,8 +21,6 @@ import {
 } from "@/lib/admin-acl";
 import { isAgendaTipo, isNotasTipo, isStreamyardTipo } from "@/lib/escala-constants";
 import { loadDashboardAction } from "@/app/actions/dashboard";
-import { loadAgendasMinistrosAction } from "@/app/actions/agendas-ministros";
-import type { AgendaMinistroCard } from "@/lib/eagendas";
 import {
   listEscalasForDashboardAction,
   moveAgendaToDateAction,
@@ -66,6 +64,11 @@ import {
 } from "@/components/StreamyardForm";
 import { PlannerMonthPicker } from "@/components/PlannerMonthPicker";
 import { PautasAppHeader, type PautasHeaderSession } from "@/components/PautasAppHeader";
+import {
+  DASHBOARD_CAL_STORAGE_KEY,
+  PAUTAS_DASHBOARD_HOME_EVENT,
+} from "@/lib/dashboard-home";
+import { DASHBOARD_HORIZON_DAYS } from "@/lib/escala-query-range";
 import {
   efemerideCalendarChipClass,
   efemerideEmoji,
@@ -332,15 +335,10 @@ function calendarOutsideMonthDayLabel(ymd: string): string {
   return `${String(d).padStart(2, "0")}/${abbr}`;
 }
 
-import {
-  DASHBOARD_CAL_STORAGE_KEY,
-  PAUTAS_DASHBOARD_HOME_EVENT,
-} from "@/lib/dashboard-home";
-
 type DashboardCalStored = {
-  scope: "month" | "week";
   monthMs: number;
-  weekStartMs: number;
+  horizonStartMs: number;
+  archive: boolean;
   viewMode: "lista" | "calendario";
 };
 
@@ -359,42 +357,27 @@ function parseDashboardCalStored(raw: string | null): DashboardCalStored | null 
   if (!raw?.trim()) return null;
   try {
     const p = JSON.parse(raw) as Partial<DashboardCalStored>;
-    if (p.scope !== "month" && p.scope !== "week") return null;
-    if (typeof p.monthMs !== "number" || typeof p.weekStartMs !== "number") {
+    if (typeof p.monthMs !== "number" || typeof p.horizonStartMs !== "number") {
       return null;
     }
     if (p.viewMode !== "lista" && p.viewMode !== "calendario") return null;
+    if (typeof p.archive !== "boolean") return null;
     if (Number.isNaN(new Date(p.monthMs).getTime())) return null;
-    if (Number.isNaN(new Date(p.weekStartMs).getTime())) return null;
+    if (Number.isNaN(new Date(p.horizonStartMs).getTime())) return null;
     return p as DashboardCalStored;
   } catch {
     return null;
   }
 }
 
-function formatWeekRangeTitle(weekStart: Date): string {
-  const end = addDaysLocal(weekStart, 6);
-  const sameMonth =
-    weekStart.getMonth() === end.getMonth() &&
-    weekStart.getFullYear() === end.getFullYear();
-  if (sameMonth) {
-    const monthYear = weekStart.toLocaleDateString("pt-BR", {
-      month: "long",
-      year: "numeric",
-    });
-    return `${weekStart.getDate()}–${end.getDate()} de ${monthYear}`;
+function formatHorizonRangeTitle(horizonStart: Date): string {
+  const end = addDaysLocal(horizonStart, DASHBOARD_HORIZON_DAYS - 1);
+  const fmt = (d: Date) =>
+    `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  if (horizonStart.getFullYear() !== end.getFullYear()) {
+    return `${fmt(horizonStart)}/${horizonStart.getFullYear()} – ${fmt(end)}/${end.getFullYear()}`;
   }
-  const a = weekStart.toLocaleDateString("pt-BR", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-  const b = end.toLocaleDateString("pt-BR", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-  return `${a} – ${b}`;
+  return `${fmt(horizonStart)} – ${fmt(end)}`;
 }
 
 function statusCalendarChipClass(status: PautaStatus | null): string {
@@ -444,17 +427,17 @@ function statusContextOptionClass(status: PautaStatus, active: boolean): string 
 }
 
 function PautasCalendar({
-  scope,
   monthAnchor,
-  weekStart,
+  horizonStart,
+  archive,
   onPrevMonth,
   onNextMonth,
   onCommitMonth,
-  onPrevWeek,
-  onNextWeek,
+  onPrevHorizon,
+  onNextHorizon,
+  onToday,
   pautasPorDia,
   escalas,
-  agendasMinistros,
   onDropDeadline,
   onDropStreamyard,
   onDropNota,
@@ -462,7 +445,6 @@ function PautasCalendar({
   controlsContent,
   onDayClick,
   onEscalaCardClick,
-  onMinistroClick,
   onPautaChipClick,
   onPautaStatusChange,
   canManageDeadlineForPauta,
@@ -470,17 +452,17 @@ function PautasCalendar({
   canDragNota,
   canDragAgenda,
 }: {
-  scope: "month" | "week";
   monthAnchor: Date;
-  weekStart: Date;
+  horizonStart: Date;
+  archive: boolean;
   onPrevMonth: () => void;
   onNextMonth: () => void;
   onCommitMonth: (year: number, monthIndex: number) => void;
-  onPrevWeek: () => void;
-  onNextWeek: () => void;
+  onPrevHorizon: () => void;
+  onNextHorizon: () => void;
+  onToday: () => void;
   pautasPorDia: Map<string, PautaRow[]>;
   escalas: EscalaRow[];
-  agendasMinistros: AgendaMinistroCard[];
   onDropDeadline: (pautaId: string, targetDayYmd: string) => void | Promise<void>;
   onDropStreamyard?: (
     escalaId: string,
@@ -497,7 +479,6 @@ function PautasCalendar({
   controlsContent?: ReactNode;
   onDayClick?: (dayYmd: string) => void;
   onEscalaCardClick?: (escala: EscalaRow, dayYmd: string) => void;
-  onMinistroClick?: (agenda: AgendaMinistroCard) => void;
   onPautaChipClick?: (p: PautaRow) => void;
   onPautaStatusChange?: (pautaId: string, status: PautaStatus) => void | Promise<void>;
   canManageDeadlineForPauta?: (p: PautaRow) => boolean;
@@ -511,40 +492,54 @@ function PautasCalendar({
   const startPad = weekdayIndexMondayFirst(first);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const weekLabels = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+  const rolling = !archive;
 
-  /** Semana começa na segunda: inclui dias do mês anterior e, à direita, do seguinte. */
   const cells: { day: number; key: string; outsideMonth: boolean }[] = [];
-  for (let i = 0; i < startPad; i++) {
-    const cellDate = addDaysLocal(first, -(startPad - i));
-    cells.push({
-      day: cellDate.getDate(),
-      key: dateToYmd(cellDate),
-      outsideMonth: true,
-    });
+  if (rolling) {
+    for (let i = 0; i < DASHBOARD_HORIZON_DAYS; i++) {
+      const cellDate = addDaysLocal(horizonStart, i);
+      cells.push({
+        day: cellDate.getDate(),
+        key: dateToYmd(cellDate),
+        outsideMonth: false,
+      });
+    }
+  } else {
+    for (let i = 0; i < startPad; i++) {
+      const cellDate = addDaysLocal(first, -(startPad - i));
+      cells.push({
+        day: cellDate.getDate(),
+        key: dateToYmd(cellDate),
+        outsideMonth: true,
+      });
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      cells.push({ day: d, key, outsideMonth: false });
+    }
+    const lastDayOfMonth = new Date(year, month, daysInMonth);
+    const tail = (7 - (cells.length % 7)) % 7;
+    for (let j = 1; j <= tail; j++) {
+      const cellDate = addDaysLocal(lastDayOfMonth, j);
+      cells.push({
+        day: cellDate.getDate(),
+        key: dateToYmd(cellDate),
+        outsideMonth: true,
+      });
+    }
   }
-  for (let d = 1; d <= daysInMonth; d++) {
-    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    cells.push({ day: d, key, outsideMonth: false });
-  }
-  const lastDayOfMonth = new Date(year, month, daysInMonth);
-  const tail = (7 - (cells.length % 7)) % 7;
-  for (let j = 1; j <= tail; j++) {
-    const cellDate = addDaysLocal(lastDayOfMonth, j);
-    cells.push({
-      day: cellDate.getDate(),
-      key: dateToYmd(cellDate),
-      outsideMonth: true,
-    });
-  }
+
+  const pickerYear = rolling ? horizonStart.getFullYear() : year;
+  const pickerMonthIndex = rolling ? horizonStart.getMonth() : month;
 
   const plannerCalendarYearBounds = useMemo(() => {
-    const y = monthAnchor.getFullYear();
+    const y = rolling ? horizonStart.getFullYear() : monthAnchor.getFullYear();
     const yNow = new Date().getFullYear();
     return {
       min: Math.min(y, yNow) - 3,
       max: Math.max(y, yNow) + 3,
     };
-  }, [monthAnchor]);
+  }, [horizonStart, monthAnchor, rolling]);
 
   const [dropHighlightKey, setDropHighlightKey] = useState<string | null>(null);
   const [statusContextMenu, setStatusContextMenu] = useState<{
@@ -675,7 +670,6 @@ function PautasCalendar({
     | { tipo: "plantao"; escala: EscalaRow }
     | { tipo: "streamyard"; escala: EscalaRow }
     | { tipo: "agenda"; escala: EscalaRow }
-    | { tipo: "ministro"; agenda: AgendaMinistroCard }
     | { tipo: "nota"; escala: EscalaRow }
     | { tipo: "pauta"; pauta: PautaRow }
     | { tipo: "ferias"; escala: EscalaRow };
@@ -685,10 +679,9 @@ function PautasCalendar({
     plantao: 2,
     streamyard: 3,
     agenda: 4,
-    ministro: 5,
-    nota: 6,
-    pauta: 7,
-    ferias: 8,
+    nota: 5,
+    pauta: 6,
+    ferias: 7,
   };
 
   const calendarioDiaItemMinutes = (item: CalendarioDiaItem): number | null => {
@@ -698,15 +691,11 @@ function PautasCalendar({
     if (item.tipo === "pauta") {
       return deadlineTimeOfDayMinutes(item.pauta.deadline);
     }
-    if (item.tipo === "ministro") {
-      return plantaoHorarioStartMinutes(item.agenda.horaInicio);
-    }
     return null;
   };
 
   const calendarioDiaItemTieBreakId = (item: CalendarioDiaItem): string => {
     if (item.tipo === "pauta") return item.pauta.id;
-    if (item.tipo === "ministro") return item.agenda.id;
     return item.escala.id;
   };
 
@@ -737,14 +726,6 @@ function PautasCalendar({
     for (const e of escalas) {
       if (isAgendaTipo(e.tipo) && e.data_inicio?.trim() === dayKey) {
         items.push({ tipo: "agenda", escala: e });
-      }
-    }
-
-    for (const agenda of agendasMinistros) {
-      const ini = agenda.dataInicio?.trim() ?? "";
-      const fim = agenda.dataFim?.trim() || ini;
-      if (dayYmdInFeriasRange(dayKey, ini, fim)) {
-        items.push({ tipo: "ministro", agenda });
       }
     }
 
@@ -836,9 +817,7 @@ function PautasCalendar({
           const key =
             item.tipo === "pauta"
               ? `pauta-${item.pauta.id}`
-              : item.tipo === "ministro"
-                ? `ministro-${item.agenda.id}`
-                : `${item.tipo}-${item.escala.id}`;
+              : `${item.tipo}-${item.escala.id}`;
 
           if (item.tipo === "feriado") {
             const e = item.escala;
@@ -976,35 +955,6 @@ function PautasCalendar({
             );
           }
 
-          if (item.tipo === "ministro") {
-            const agenda = item.agenda;
-            const hora = [agenda.horaInicio, agenda.horaFim]
-              .filter((part): part is string => Boolean(part?.trim()))
-              .join("–");
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={(ev) => {
-                  ev.stopPropagation();
-                  onMinistroClick?.(agenda);
-                }}
-                className="block w-full cursor-pointer rounded border border-indigo-300 bg-indigo-50 px-1.5 py-1 text-left text-[11px] font-medium leading-snug text-indigo-950 shadow-sm transition hover:bg-indigo-100 hover:ring-2 hover:ring-indigo-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-indigo-500"
-              >
-                <span className="block font-semibold">{agenda.tipoRegistro}</span>
-                <span className="line-clamp-2">{agenda.assunto}</span>
-                <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
-                  {agenda.ministroNome}
-                </span>
-                {hora ? (
-                  <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
-                    {hora}
-                  </span>
-                ) : null}
-              </button>
-            );
-          }
-
           if (item.tipo === "ferias") {
             const e = item.escala;
             return (
@@ -1110,35 +1060,39 @@ function PautasCalendar({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
         <button
           type="button"
-          onClick={scope === "month" ? onPrevMonth : onPrevWeek}
+          onClick={rolling ? onPrevHorizon : onPrevMonth}
           className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
         >
-          {scope === "month" ? "← Mês anterior" : "← Semana anterior"}
+          {rolling ? "← Semanas anteriores" : "← Mês anterior"}
         </button>
-        {scope === "month" ? (
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-center gap-2">
+          <button
+            type="button"
+            onClick={onToday}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            Hoje
+          </button>
           <PlannerMonthPicker
-            year={year}
-            monthIndex={month}
+            year={pickerYear}
+            monthIndex={pickerMonthIndex}
             yearMin={plannerCalendarYearBounds.min}
             yearMax={plannerCalendarYearBounds.max}
             onCommit={onCommitMonth}
+            triggerLabel={
+              rolling ? formatHorizonRangeTitle(horizonStart) : undefined
+            }
           />
-        ) : (
-          <h2 className="flex-1 text-center text-lg font-semibold capitalize text-slate-900">
-            {formatWeekRangeTitle(weekStart)}
-          </h2>
-        )}
+        </div>
         <button
           type="button"
-          onClick={scope === "month" ? onNextMonth : onNextWeek}
+          onClick={rolling ? onNextHorizon : onNextMonth}
           className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
         >
-          {scope === "month" ? "Próximo mês →" : "Próxima semana →"}
+          {rolling ? "Próximas semanas →" : "Próximo mês →"}
         </button>
         </div>
         {controlsContent}
-        {scope === "month" ? (
-          <>
           <div className="grid grid-cols-7 gap-px border-b border-slate-200 bg-slate-200">
             {weekLabels.map((w) => (
               <div
@@ -1167,10 +1121,12 @@ function PautasCalendar({
                 >
                   <div
                     className={`mb-1 text-right text-xs font-semibold tabular-nums ${
-                      outside ? "text-slate-400" : "text-slate-500"
+                      outside && !rolling ? "text-slate-400" : "text-slate-500"
                     }`}
                   >
-                    {outside ? calendarOutsideMonthDayLabel(dayKey) : cell.day}
+                    {rolling || outside
+                      ? calendarOutsideMonthDayLabel(dayKey)
+                      : cell.day}
                   </div>
                   {renderCalendarioDiaCards(dayKey)}
                   {renderCalendarioDiaEfemerides(dayKey)}
@@ -1178,52 +1134,6 @@ function PautasCalendar({
               );
             })}
           </div>
-          </>
-        ) : (
-          <>
-          <div className="grid grid-cols-7 gap-px border-b border-slate-200 bg-slate-200">
-            {Array.from({ length: 7 }, (_, i) => {
-              const d = addDaysLocal(weekStart, i);
-              const ymd = dateToYmd(d);
-              return (
-                <div
-                  key={ymd}
-                  className="bg-slate-100 px-1 py-2 text-center text-slate-600"
-                >
-                  <div className="text-xs font-semibold uppercase tracking-wide">
-                    {weekLabels[weekdayIndexMondayFirst(d)]}
-                  </div>
-                  <div className="mt-0.5 text-[11px] font-medium capitalize tabular-nums text-slate-700 sm:text-xs">
-                    {d.toLocaleDateString("pt-BR", {
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="grid grid-cols-7 items-stretch gap-px bg-slate-200">
-            {Array.from({ length: 7 }, (_, i) => {
-              const dayKey = dateToYmd(addDaysLocal(weekStart, i));
-              return (
-                <div
-                  key={dayKey}
-                  className={`h-auto min-h-[150px] p-1.5 transition-colors sm:min-h-[12rem] sm:p-2 ${
-                    dropHighlightKey === dayKey
-                      ? "bg-blue-50/90 ring-2 ring-inset ring-blue-400/70"
-                      : "bg-white"
-                  }${onDayClick ? " cursor-pointer" : ""}`}
-                  {...dayCellHandlers(dayKey)}
-                >
-                  {renderCalendarioDiaCards(dayKey)}
-                  {renderCalendarioDiaEfemerides(dayKey)}
-                </div>
-              );
-            })}
-          </div>
-          </>
-        )}
       </div>
       {statusContextMenu && (
         <div
@@ -1379,11 +1289,6 @@ export function PautasDashboard({
   const router = useRouter();
   const [pautas, setPautas] = useState<PautaRow[]>([]);
   const [escalas, setEscalas] = useState<EscalaRow[]>([]);
-  const [agendasMinistros, setAgendasMinistros] = useState<AgendaMinistroCard[]>(
-    []
-  );
-  const [ministroDetalhe, setMinistroDetalhe] =
-    useState<AgendaMinistroCard | null>(null);
   const [usuariosFiltro, setUsuariosFiltro] = useState<ModalReporterOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1415,14 +1320,14 @@ export function PautasDashboard({
     const d = new Date();
     return new Date(d.getFullYear(), d.getMonth(), 1);
   });
-  const [calendarScope, setCalendarScope] = useState<"month" | "week">(() => {
+  const [calendarHorizonStart, setCalendarHorizonStart] = useState(() => {
     const p = readDashboardCalFromStorage();
-    return p?.scope ?? "month";
-  });
-  const [calendarWeekStart, setCalendarWeekStart] = useState(() => {
-    const p = readDashboardCalFromStorage();
-    if (p) return new Date(p.weekStartMs);
+    if (p) return startOfWeekMonday(new Date(p.horizonStartMs));
     return startOfWeekMonday(new Date());
+  });
+  const [calendarArchive, setCalendarArchive] = useState(() => {
+    const p = readDashboardCalFromStorage();
+    return p?.archive === true;
   });
 
   const skipFirstCalPersistRef = useRef(true);
@@ -1435,36 +1340,35 @@ export function PautasDashboard({
     }
     try {
       const payload: DashboardCalStored = {
-        scope: calendarScope,
         monthMs: calendarMonth.getTime(),
-        weekStartMs: calendarWeekStart.getTime(),
+        horizonStartMs: calendarHorizonStart.getTime(),
+        archive: calendarArchive,
         viewMode,
       };
       sessionStorage.setItem(DASHBOARD_CAL_STORAGE_KEY, JSON.stringify(payload));
     } catch {
       /* ignore */
     }
-  }, [calendarScope, calendarMonth, calendarWeekStart, viewMode]);
+  }, [calendarMonth, calendarHorizonStart, calendarArchive, viewMode]);
+
+  const goCalendarToday = useCallback(() => {
+    const monday = startOfWeekMonday(new Date());
+    setCalendarArchive(false);
+    setCalendarHorizonStart(monday);
+    setCalendarMonth(new Date(monday.getFullYear(), monday.getMonth(), 1));
+    setViewMode("calendario");
+  }, []);
 
   useEffect(() => {
     const onDashboardHome = () => {
-      setViewMode("calendario");
+      goCalendarToday();
     };
     window.addEventListener(PAUTAS_DASHBOARD_HOME_EVENT, onDashboardHome);
     return () => {
       window.removeEventListener(PAUTAS_DASHBOARD_HOME_EVENT, onDashboardHome);
     };
-  }, []);
+  }, [goCalendarToday]);
 
-  const handleCalendarScopeChange = useCallback((s: "month" | "week") => {
-    setCalendarScope(s);
-    if (s === "week") {
-      setCalendarWeekStart(startOfWeekMonday(new Date()));
-    } else {
-      const ref = calendarWeekStart;
-      setCalendarMonth(new Date(ref.getFullYear(), ref.getMonth(), 1));
-    }
-  }, [calendarWeekStart]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [modalTitulo, setModalTitulo] = useState("");
@@ -1714,13 +1618,12 @@ export function PautasDashboard({
 
   const escalaQueryInput = useMemo((): LoadDashboardInput => {
     return {
-      escalaScope: calendarScope,
       year: calendarMonth.getFullYear(),
       monthIndex: calendarMonth.getMonth(),
-      weekStartYmd:
-        calendarScope === "week" ? dateToYmd(calendarWeekStart) : undefined,
+      horizonStartYmd: dateToYmd(calendarHorizonStart),
+      archive: calendarArchive,
     };
-  }, [calendarScope, calendarMonth, calendarWeekStart]);
+  }, [calendarMonth, calendarHorizonStart, calendarArchive]);
 
   const escalaQueryInputRef = useRef(escalaQueryInput);
   escalaQueryInputRef.current = escalaQueryInput;
@@ -1730,7 +1633,6 @@ export function PautasDashboard({
         ok: true;
         pautas: PautaRow[];
         escalas: EscalaRow[];
-        agendasMinistros: AgendaMinistroCard[];
         usuarios: ModalReporterOption[];
         session: {
           userId: string;
@@ -1754,7 +1656,6 @@ export function PautasDashboard({
       ok: true,
       pautas: res.pautas as PautaRow[],
       escalas: (res.escalas ?? []) as unknown as EscalaRow[],
-      agendasMinistros: res.agendasMinistros ?? [],
       usuarios: (res.reporters ?? []) as ModalReporterOption[],
       session: {
         userId: res.session.userId,
@@ -1775,20 +1676,18 @@ export function PautasDashboard({
       setError(res.error);
       setPautas([]);
       setEscalas([]);
-      setAgendasMinistros([]);
       setUsuariosFiltro([]);
       setSessionCtx(null);
     } else {
       setPautas(res.pautas);
       setEscalas(res.escalas);
-      setAgendasMinistros(res.agendasMinistros);
       setUsuariosFiltro(res.usuarios);
       setSessionCtx(res.session);
     }
     setLoading(false);
   }, [fetchDashboardData]);
 
-  /** Atualiza pautas/escalas sem `loading` global — preserva Mês/Semana e demais estado de UI. */
+  /** Atualiza pautas/escalas sem `loading` global — preserva o estado de UI. */
   const refreshDashboardData = useCallback(async () => {
     const res = await fetchDashboardData();
     if (!res.ok) {
@@ -1800,7 +1699,6 @@ export function PautasDashboard({
     }
     setPautas(res.pautas);
     setEscalas(res.escalas);
-    setAgendasMinistros(res.agendasMinistros);
     setUsuariosFiltro(res.usuarios);
     setSessionCtx(res.session);
   }, [fetchDashboardData]);
@@ -1853,23 +1751,10 @@ export function PautasDashboard({
       if (cancelled || !res.ok) return;
       setEscalas((res.rows ?? []) as unknown as EscalaRow[]);
     });
-    void loadAgendasMinistrosAction(escalaQueryInput).then((res) => {
-      if (cancelled || !res.ok) return;
-      setAgendasMinistros(res.rows);
-    });
     return () => {
       cancelled = true;
     };
   }, [escalaQueryInput]);
-
-  useEffect(() => {
-    if (!ministroDetalhe) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMinistroDetalhe(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [ministroDetalhe]);
 
   useEffect(() => {
     if (!sessionCtx || privilegedSession) return;
@@ -2476,36 +2361,6 @@ export function PautasDashboard({
         <div
           className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 shadow-inner"
           role="group"
-          aria-label="Alternar entre visão mensal e semanal"
-        >
-          <button
-            type="button"
-            onClick={() => handleCalendarScopeChange("month")}
-            aria-pressed={calendarScope === "month"}
-            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-              calendarScope === "month"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            Mês
-          </button>
-          <button
-            type="button"
-            onClick={() => handleCalendarScopeChange("week")}
-            aria-pressed={calendarScope === "week"}
-            className={`rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-              calendarScope === "week"
-                ? "bg-white text-slate-900 shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            Semana
-          </button>
-        </div>
-        <div
-          className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 shadow-inner"
-          role="group"
           aria-label="Alternar entre calendário e lista"
         >
           <button
@@ -2866,9 +2721,9 @@ export function PautasDashboard({
 
           {viewMode === "calendario" && (
             <PautasCalendar
-              scope={calendarScope}
               monthAnchor={calendarMonth}
-              weekStart={calendarWeekStart}
+              horizonStart={calendarHorizonStart}
+              archive={calendarArchive}
               onPrevMonth={() =>
                 setCalendarMonth(
                   (d) => new Date(d.getFullYear(), d.getMonth() - 1, 1)
@@ -2879,16 +2734,19 @@ export function PautasDashboard({
                   (d) => new Date(d.getFullYear(), d.getMonth() + 1, 1)
                 )
               }
-              onCommitMonth={(y, m) => setCalendarMonth(new Date(y, m, 1))}
-              onPrevWeek={() =>
-                setCalendarWeekStart((d) => addDaysLocal(d, -7))
+              onCommitMonth={(y, m) => {
+                setCalendarArchive(true);
+                setCalendarMonth(new Date(y, m, 1));
+              }}
+              onPrevHorizon={() =>
+                setCalendarHorizonStart((d) => addDaysLocal(d, -7))
               }
-              onNextWeek={() =>
-                setCalendarWeekStart((d) => addDaysLocal(d, 7))
+              onNextHorizon={() =>
+                setCalendarHorizonStart((d) => addDaysLocal(d, 7))
               }
+              onToday={goCalendarToday}
               pautasPorDia={pautasPorDia}
               escalas={escalas}
-              agendasMinistros={agendasMinistros}
               onDropDeadline={handleCalendarDeadlineDrop}
               onDropStreamyard={handleCalendarStreamyardDrop}
               onDropNota={handleCalendarNotaDrop}
@@ -2896,7 +2754,6 @@ export function PautasDashboard({
               controlsContent={controlsLinha}
               onDayClick={handleCalendarDayClick}
               onEscalaCardClick={handleEscalaCardClick}
-              onMinistroClick={setMinistroDetalhe}
               onPautaChipClick={handleCalendarioPautaChipClick}
               onPautaStatusChange={handleCalendarStatusChange}
               canManageDeadlineForPauta={canManagePauta}
@@ -3365,123 +3222,6 @@ export function PautasDashboard({
                 />
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {ministroDetalhe && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
-          role="presentation"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setMinistroDetalhe(null);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="ministro-agenda-titulo"
-            className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <h2
-                id="ministro-agenda-titulo"
-                className="text-lg font-semibold text-slate-900"
-              >
-                {ministroDetalhe.tipoRegistro}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setMinistroDetalhe(null)}
-                className="shrink-0 rounded-md p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-                aria-label="Fechar"
-              >
-                ×
-              </button>
-            </div>
-            <p className="mt-3 text-sm text-slate-600">
-              Compromisso público do e-Agendas. Só é possível consultar.
-            </p>
-            <dl className="mt-4 space-y-3 text-sm">
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Assunto
-                </dt>
-                <dd className="mt-0.5 text-slate-900">{ministroDetalhe.assunto}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Ministro
-                </dt>
-                <dd className="mt-0.5 text-slate-900">
-                  {ministroDetalhe.ministroNome}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Cargo
-                </dt>
-                <dd className="mt-0.5 text-slate-800">
-                  {ministroDetalhe.cargo?.trim() || "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Órgão
-                </dt>
-                <dd className="mt-0.5 text-slate-800">
-                  {ministroDetalhe.orgao?.trim() || "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Data
-                </dt>
-                <dd className="mt-0.5 text-slate-800">
-                  {ministroDetalhe.dataFim &&
-                  ministroDetalhe.dataFim !== ministroDetalhe.dataInicio
-                    ? `${formatDeadlinePtBR(ministroDetalhe.dataInicio)} – ${formatDeadlinePtBR(ministroDetalhe.dataFim)}`
-                    : formatDeadlinePtBR(ministroDetalhe.dataInicio)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Horário
-                </dt>
-                <dd className="mt-0.5 text-slate-800">
-                  {[ministroDetalhe.horaInicio, ministroDetalhe.horaFim]
-                    .filter((part) => part?.trim())
-                    .join(" – ") || "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Local
-                </dt>
-                <dd className="mt-0.5 text-slate-800">
-                  {ministroDetalhe.local?.trim() || "—"}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Participantes
-                </dt>
-                <dd className="mt-0.5 whitespace-pre-wrap text-slate-800">
-                  {ministroDetalhe.participantes?.trim() || "—"}
-                </dd>
-              </div>
-            </dl>
-            {ministroDetalhe.url ? (
-              <a
-                href={ministroDetalhe.url}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-5 inline-flex text-sm font-medium text-blue-700 underline-offset-2 hover:underline"
-              >
-                Ver no e-Agendas
-              </a>
-            ) : null}
           </div>
         </div>
       )}

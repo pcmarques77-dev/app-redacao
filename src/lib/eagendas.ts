@@ -635,7 +635,8 @@ async function syncPeriodo(
 export async function syncAgendasMinistrosForRange(
   admin: SupabaseClient,
   rangeStart: string,
-  rangeEnd: string
+  rangeEnd: string,
+  force = false
 ): Promise<void> {
   if (!eagendasTokenConfigured()) return;
 
@@ -661,6 +662,7 @@ export async function syncAgendasMinistrosForRange(
   }
 
   const due = [...visible].filter((periodo) => {
+    if (force) return true;
     const at = syncedAt.get(periodo);
     const recent = periodo >= previous;
     if (at == null) return true;
@@ -716,10 +718,11 @@ export async function listAgendasMinistrosInRange(
 export async function loadAgendasMinistros(
   admin: SupabaseClient,
   rangeStart: string,
-  rangeEnd: string
+  rangeEnd: string,
+  force = false
 ): Promise<AgendaMinistroCard[]> {
   try {
-    await syncAgendasMinistrosForRange(admin, rangeStart, rangeEnd);
+    await syncAgendasMinistrosForRange(admin, rangeStart, rangeEnd, force);
   } catch (error) {
     console.error(error);
   }

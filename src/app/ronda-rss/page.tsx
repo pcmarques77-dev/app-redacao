@@ -50,6 +50,12 @@ export default async function RondaRssPage() {
       label: "Ronda Tech",
       apiPath: "/api/ronda-rss?kind=tech",
     },
+    {
+      id: "agendas-ministros",
+      label: "Agenda Ministros",
+      panel: "agendas-ministros" as const,
+      emptyLabel: "Nenhum compromisso de ministro nos próximos 21 dias.",
+    },
     ...(discoverEmbedUrl
       ? ([
           {

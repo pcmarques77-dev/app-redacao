@@ -60,22 +60,38 @@ export function ymdAddDays(ymd: string, days: number): string {
   return dateToYmdLocal(dt);
 }
 
+/** Grade de produção: semana atual + 3 seguintes. */
+export const DASHBOARD_HORIZON_WEEKS = 4;
+export const DASHBOARD_HORIZON_DAYS = DASHBOARD_HORIZON_WEEKS * 7;
+
 export type DashboardEscalaQueryInput = {
-  escalaScope: "month" | "week";
   year: number;
   monthIndex: number;
-  /** Segunda-feira (YYYY-MM-DD); usado quando `escalaScope === "week"`. */
-  weekStartYmd?: string;
+  /** Segunda-feira do recorte rolante de 4 semanas (vista de produção). */
+  horizonStartYmd?: string;
+  /** Mês civil completo (arquivo). */
+  archive?: boolean;
 };
 
-/** Intervalo de escalas visível no calendário da home (mês ou semana). */
+export function dashboardHorizonQueryRange(horizonStartYmd: string): {
+  rangeStart: string;
+  rangeEnd: string;
+} {
+  const start = horizonStartYmd.trim();
+  return {
+    rangeStart: start,
+    rangeEnd: ymdAddDays(start, DASHBOARD_HORIZON_DAYS - 1),
+  };
+}
+
+/** Intervalo de escalas visível no calendário da home (recorte rolante ou mês civil). */
 export function dashboardEscalaQueryRange(
   input: DashboardEscalaQueryInput
 ): { rangeStart: string; rangeEnd: string } {
-  if (input.escalaScope === "week") {
-    const start = (input.weekStartYmd ?? "").trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(start)) {
-      return { rangeStart: start, rangeEnd: ymdAddDays(start, 6) };
+  if (!input.archive) {
+    const horizon = (input.horizonStartYmd ?? "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(horizon)) {
+      return dashboardHorizonQueryRange(horizon);
     }
   }
   return plannerQueryRangeYm(input.year, input.monthIndex);

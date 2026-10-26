@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getSessionPrivilegesAction } from "@/app/actions/admin";
+import { AgendasMinistrosPanel } from "@/components/AgendasMinistrosPanel";
 import { PautasAppHeader, type PautasHeaderSession } from "@/components/PautasAppHeader";
 import { FonteLogo } from "./FonteLogo";
 
@@ -79,6 +80,8 @@ type RondaRoundTab = {
   emptyLabel?: string;
   /** Google Trends: permite ordenar por data ou volume de pesquisa. */
   enableDateVolumeSort?: boolean;
+  /** Painel próprio (não usa `apiPath` nem embed). */
+  panel?: "agendas-ministros";
 };
 
 function sortNoticiasTrends(
@@ -156,9 +159,10 @@ export function RondaClient({
       : null;
 
   const embedUrl = activeRoundTab?.embedUrl?.trim() || undefined;
+  const customPanel = activeRoundTab?.panel === "agendas-ministros";
 
   const effectiveApiPath = tabMode
-    ? embedUrl
+    ? embedUrl || customPanel
       ? null
       : activeRoundTab?.apiPath ?? roundTabs[0]!.apiPath
     : apiPath;
@@ -393,8 +397,8 @@ export function RondaClient({
           </div>
         ) : null}
 
-        {((showAtualizarButton && !embedUrl) ||
-          (!embedUrl && (enableTrendsSort || carregandoLista))) ? (
+        {((showAtualizarButton && !embedUrl && !customPanel) ||
+          (!embedUrl && !customPanel && (enableTrendsSort || carregandoLista))) ? (
           <div className="mb-8 flex flex-wrap items-center gap-3">
             {showAtualizarButton && !embedUrl ? (
               <button
@@ -477,7 +481,7 @@ export function RondaClient({
           </div>
         ) : null}
 
-        {erro ? (
+        {erro && !customPanel ? (
           <div
             className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
             role="alert"
@@ -489,6 +493,7 @@ export function RondaClient({
         {jaBuscou &&
           !carregandoLista &&
           !embedUrl &&
+          !customPanel &&
           noticiasExibidas.length === 0 && (
             <p className="rounded-xl border border-dashed border-slate-300 bg-white/80 px-6 py-12 text-center text-sm text-slate-500">
               {activeRoundTab?.emptyLabel ??
@@ -515,7 +520,9 @@ export function RondaClient({
           </div>
         ) : null}
 
-        {!embedUrl && noticiasExibidas.length > 0 && (
+        {customPanel ? <AgendasMinistrosPanel /> : null}
+
+        {!embedUrl && !customPanel && noticiasExibidas.length > 0 && (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             {noticiasExibidas.map((n, i) => (
               <article
