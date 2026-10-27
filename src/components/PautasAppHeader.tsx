@@ -18,7 +18,7 @@ export type PautasHeaderSession = {
 };
 
 /**
- * Cabeçalho do calendário geral (logo, cadastro, Calendário, Radar de Pautas, Produção*, Plantões*, Admin, Nova Pauta).
+ * Cabeçalho do calendário geral (logo, cadastro, Calendário, Radar de Pautas, Últimas, Produção*, Plantões*, Admin, Nova Pauta).
  * *Produção e Plantões só para Editor/super admin.
  * Sessão vem do servidor (sem fetch no cliente) para a nav já nascer no HTML.
  */
@@ -37,6 +37,7 @@ export function PautasAppHeader({
 
   const onCalendario = pathname === CALENDARIO_PAUTAS_PATH;
   const onRadar = pathname.startsWith("/ronda-rss");
+  const onUltimas = pathname.startsWith("/ultimas");
   const onPlantoes = pathname.startsWith("/escala/plantoes");
   const onProducao = pathname.startsWith("/producao");
   const onAdmin = pathname.startsWith("/admin");
@@ -105,6 +106,13 @@ export function PautasAppHeader({
           aria-current={onRadar ? "page" : undefined}
         >
           Radar de Pautas
+        </Link>
+        <Link
+          href="/ultimas"
+          className={onUltimas ? outlineNavActive : outlineNavInactive}
+          aria-current={onUltimas ? "page" : undefined}
+        >
+          Últimas
         </Link>
         {session?.canManageEscala ? (
           <>
