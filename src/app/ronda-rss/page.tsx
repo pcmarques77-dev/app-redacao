@@ -4,6 +4,9 @@ import { loadPautasHeaderSession } from "@/components/PautasAppHeaderServer";
 /** Evita pré-render estático com URL vazia: lê env no deploy a cada request. */
 export const dynamic = "force-dynamic";
 
+/** A primeira sincronização das agendas percorre todos os ministérios. */
+export const maxDuration = 120;
+
 export const metadata = {
   title: "Radar de Pautas",
 };

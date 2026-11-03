@@ -1,10 +1,29 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const API_BASE = "https://eagendas.cgu.gov.br/api/v2";
+const PUBLIC_ORGAOS_URL =
+  "https://eagendas.cgu.gov.br/pesquisa/orgaos/ativo/true";
 const ROSTER_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const RECENT_SYNC_MAX_AGE_MS = 30 * 60 * 1000;
 const FETCH_CONCURRENCY = 5;
 const PAGE_CAP = 20;
+const LIST_PAGE_SIZE = 1000;
+/** Abaixo disso a lista pública veio incompleta e não substitui o cache. */
+const MIN_MINISTROS_PUBLICOS = 20;
+
+/**
+ * Chefes com status de ministro de Estado cujo órgão não se chama Ministério.
+ * A lista pública da CGU marca o cargo com autoridade_maxima_orgao.
+ */
+const ORGAOS_COM_MINISTRO = [
+  "casa civil da presidencia da republica",
+  "secretaria-geral da presidencia da republica",
+  "secretaria de relacoes institucionais da presidencia da republica",
+  "secretaria de comunicacao social da presidencia da republica",
+  "gabinete de seguranca institucional da presidencia da republica",
+  "controladoria-geral da uniao",
+  "advocacia-geral da uniao",
+];
 
 /** Agente citado no plano (ministro da Integração). Entra se o cargo for de ministro de Estado. */
 const MIDR_APO_ID = "15618";
@@ -62,11 +81,52 @@ export function eagendasTokenConfigured(): boolean {
 
 export function isOrgaoMinisterio(nome: string): boolean {
   const n = fold(nome);
-  return n.startsWith("ministerio ") || n === "ministerio";
+  return (
+    n.startsWith("ministerio ") ||
+    n === "ministerio" ||
+    n.includes(" - ministerio ")
+  );
 }
 
+export function isOrgaoComMinistroDeEstado(nome: string): boolean {
+  const n = fold(nome);
+  if (isOrgaoMinisterio(n)) return true;
+  return ORGAOS_COM_MINISTRO.some(
+    (orgao) => n === orgao || n.startsWith(`${orgao} `)
+  );
+}
+
+/**
+ * Cargo de ministro de Estado, inclusive títulos fora do padrão
+ * ("MINISTRO(A) DA FAZENDA", "MINISTRA", "MINISTR0(A) ...").
+ * Não inclui carreira diplomática nem assessoria do ministro.
+ */
 export function isCargoMinistroDeEstado(descricao: string): boolean {
-  return fold(descricao).startsWith("ministro de estado");
+  let n = fold(descricao).replace(/\s+/g, " ");
+  if (n.includes("conselheiro") || n.includes("classe")) return false;
+  n = n.replace(/^ministr0\b/, "ministro");
+  n = n.replace(/ministro\s*\(\s*a\s*\)/g, "ministro");
+  n = n.replace(/ministra\s*\(\s*a\s*\)/g, "ministra");
+  if (n.startsWith("ministro de estado") || n.startsWith("ministra de estado")) {
+    return true;
+  }
+  if (n.startsWith("ministro-chefe") || n.startsWith("ministra-chefe")) {
+    return true;
+  }
+  if (/^ministro d(?:e|a|o|as|os) /.test(n)) return true;
+  if (/^ministra d(?:e|a|o|as|os) /.test(n)) return true;
+  return (
+    n === "ministro" ||
+    n === "ministra" ||
+    n === "ministra / ministro" ||
+    n === "ministro / ministra"
+  );
+}
+
+export function isAutoridadeMaximaDoOrgao(row: Record<string, unknown>): boolean {
+  if (!isRecord(row.cargo_confianca)) return false;
+  const flag = row.cargo_confianca.autoridade_maxima_orgao;
+  return flag === 1 || flag === true || flag === "1";
 }
 
 function fold(value: string): string {
@@ -339,13 +399,117 @@ function ministroFromApo(
   };
 }
 
+function publicAposUrl(orgaoId: string): string {
+  return `https://eagendas.cgu.gov.br/pesquisa/agentes-publicos-obrigados-por-orgao/orgao/${orgaoId}/ativo/true`;
+}
+
+function exercicioDeMinistro(value: unknown): boolean {
+  const n = fold(text(value) ?? "");
+  if (!n) return true;
+  return n === "titular" || n.startsWith("interin");
+}
+
+function rotuloOrgao(sigla: string | null, nome: string): string {
+  if (sigla && nome && !fold(nome).startsWith(fold(sigla))) {
+    return `${sigla} - ${nome}`;
+  }
+  return nome || sigla || "";
+}
+
+/** Cargo marcado pela CGU como autoridade máxima do órgão, em exercício titular. */
+export function ministroDeEstadoFromApo(
+  row: Record<string, unknown>,
+  orgao: { id: string; nome: string }
+): Ministro | null {
+  if (!isAutoridadeMaximaDoOrgao(row) || !exercicioDeMinistro(row.tipo_exercicio)) {
+    return null;
+  }
+  const apoId = pickText(row, ["pertenencia_id", "id", "apo_id"]);
+  if (!apoId) return null;
+  const nome = pickText(row, ["nome", "nome_apo", "nome_agente"]) ?? "Ministro";
+  const cargo = pickText(row, ["cargo", "descricao_cargo"]) ?? "";
+  const orgaoNome = rotuloOrgao(
+    pickText(row, ["sigla"]),
+    pickText(row, ["orgao", "orgao_nome"]) ?? orgao.nome
+  );
+  return {
+    apoId,
+    nome,
+    cargo,
+    orgaoId: pickText(row, ["orgao_id"]) ?? orgao.id,
+    orgaoNome,
+  };
+}
+
+async function publicGet(url: string): Promise<unknown | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as unknown;
+  } catch (error) {
+    console.error("e-Agendas público", error);
+    return null;
+  }
+}
+
+/**
+ * A API autenticada só devolve cargos cujo texto contém "ministro de estado".
+ * Vários ministros estão cadastrados com outro título ("MINISTRO(A) DA FAZENDA").
+ * A consulta pública traz a marca autoridade_maxima_orgao e o nome do agente.
+ */
+async function discoverMinistrosPublicos(): Promise<Ministro[] | null> {
+  const payload = await publicGet(PUBLIC_ORGAOS_URL);
+  if (!Array.isArray(payload)) return null;
+  const orgaos = payload.filter(isRecord).filter((orgao) => {
+    const nome = pickText(orgao, ["nombre", "nome", "sigla_nome"]) ?? "";
+    return isOrgaoComMinistroDeEstado(nome);
+  });
+  if (orgaos.length === 0) return null;
+
+  const groups = await mapPool(orgaos, FETCH_CONCURRENCY, async (orgao) => {
+    const orgaoId = pickText(orgao, ["id"]);
+    const orgaoNome = pickText(orgao, ["nombre", "nome"]) ?? "";
+    if (!orgaoId) return [] as Ministro[];
+    const apos = await publicGet(publicAposUrl(orgaoId));
+    if (!Array.isArray(apos)) return null;
+    const ministros: Ministro[] = [];
+    for (const apo of apos.filter(isRecord)) {
+      const ministro = ministroDeEstadoFromApo(apo, {
+        id: orgaoId,
+        nome: orgaoNome,
+      });
+      if (ministro) ministros.push(ministro);
+    }
+    return ministros;
+  });
+
+  const failed = groups.filter((group) => group === null).length;
+  if (failed > 5) return null;
+  const byId = new Map<string, Ministro>();
+  for (const group of groups) {
+    for (const ministro of group ?? []) byId.set(ministro.apoId, ministro);
+  }
+  if (byId.size < MIN_MINISTROS_PUBLICOS) return null;
+  return [...byId.values()];
+}
+
 async function discoverMinistros(): Promise<Ministro[] | null> {
+  const publicados = await discoverMinistrosPublicos();
+  if (publicados && publicados.length > 0) return publicados;
+  return discoverMinistrosPelaApi();
+}
+
+async function discoverMinistrosPelaApi(): Promise<Ministro[] | null> {
   const orgaos = await apiList("orgaos", "orgaos", { situacao: "ativo" });
   if (!orgaos) return null;
 
   const ministerios = orgaos.filter((orgao) => {
     const nome = pickText(orgao, ["nome", "nombre", "descricao"]) ?? "";
-    return isOrgaoMinisterio(nome);
+    return isOrgaoComMinistroDeEstado(nome);
   });
 
   const found = await mapPool(ministerios, FETCH_CONCURRENCY, async (orgao) => {
@@ -354,7 +518,7 @@ async function discoverMinistros(): Promise<Ministro[] | null> {
     if (!orgaoId) return [] as Ministro[];
     const cargos = await apiList("cargos-comissionados", "cargos_comissionados", {
       orgao_id: orgaoId,
-      descricao: "MINISTRO DE ESTADO",
+      descricao: "Ministro",
       situacao: "ativo",
     });
     if (!cargos) return null;
@@ -446,21 +610,41 @@ async function readRoster(
   };
 }
 
+function rosterSemNome(ministros: Ministro[]): boolean {
+  return ministros.some((item) => {
+    const nome = fold(item.nome ?? "");
+    return nome === "" || nome === "ministro" || nome === "ministra";
+  });
+}
+
 async function ministrosAtuais(
-  admin: SupabaseClient
-): Promise<Ministro[] | null> {
+  admin: SupabaseClient,
+  force = false
+): Promise<{ ministros: Ministro[]; refreshed: boolean } | null> {
   const cached = await readRoster(admin);
   if (!cached) return null;
   const age = cached.atualizadoEm
     ? Date.now() - new Date(cached.atualizadoEm).getTime()
     : Number.POSITIVE_INFINITY;
-  if (cached.ministros.length > 0 && age < ROSTER_MAX_AGE_MS) {
-    return cached.ministros;
+  const completo = !rosterSemNome(cached.ministros);
+  if (
+    !force &&
+    cached.ministros.length > 0 &&
+    age < ROSTER_MAX_AGE_MS &&
+    completo
+  ) {
+    return { ministros: cached.ministros, refreshed: false };
   }
   const fresh = await discoverMinistros();
-  if (!fresh) return cached.ministros.length > 0 ? cached.ministros : null;
+  if (!fresh) {
+    return cached.ministros.length > 0
+      ? { ministros: cached.ministros, refreshed: false }
+      : null;
+  }
   if (fresh.length === 0) {
-    return cached.ministros.length > 0 ? cached.ministros : [];
+    return cached.ministros.length > 0
+      ? { ministros: cached.ministros, refreshed: false }
+      : { ministros: [], refreshed: false };
   }
   const { error } = await admin.from("agendas_ministros_roster").upsert(
     {
@@ -471,7 +655,7 @@ async function ministrosAtuais(
     { onConflict: "id" }
   );
   if (error) console.error(error.message);
-  return fresh;
+  return { ministros: fresh, refreshed: true };
 }
 
 function assuntoOf(
@@ -606,7 +790,7 @@ async function syncPeriodo(
   const groups = await mapPool(ministros, FETCH_CONCURRENCY, (ministro) =>
     registrosDoMinistro(ministro, start, end)
   );
-  if (groups.some((group) => group === null)) return false;
+  const failed = groups.some((group) => group === null);
   const byKey = new Map<string, AgendaRowInsert>();
   for (const group of groups) {
     for (const row of group ?? []) {
@@ -614,7 +798,7 @@ async function syncPeriodo(
     }
   }
   const saved = await upsertRows(admin, [...byKey.values()]);
-  if (!saved) return false;
+  if (!saved || failed) return false;
   const { error } = await admin.from("agendas_ministros_sync").upsert(
     { periodo, sincronizado_em: new Date().toISOString() },
     { onConflict: "periodo" }
@@ -661,21 +845,26 @@ export async function syncAgendasMinistrosForRange(
     if (periodo && at) syncedAt.set(periodo, new Date(at).getTime());
   }
 
-  const due = [...visible].filter((periodo) => {
-    if (force) return true;
-    const at = syncedAt.get(periodo);
-    const recent = periodo >= previous;
-    if (at == null) return true;
-    if (!recent) return false;
-    return Date.now() - at >= RECENT_SYNC_MAX_AGE_MS;
-  });
-  if (due.length === 0) return;
+  const roster = await ministrosAtuais(admin, force);
+  if (!roster || roster.ministros.length === 0) return;
 
-  const ministros = await ministrosAtuais(admin);
-  if (!ministros || ministros.length === 0) return;
+  const due = new Set(
+    [...visible].filter((periodo) => {
+      if (force || roster.refreshed) {
+        const recent = periodo >= previous;
+        return recent || !syncedAt.has(periodo);
+      }
+      const at = syncedAt.get(periodo);
+      const recent = periodo >= previous;
+      if (at == null) return true;
+      if (!recent) return false;
+      return Date.now() - at >= RECENT_SYNC_MAX_AGE_MS;
+    })
+  );
+  if (due.size === 0) return;
 
   for (const periodo of due) {
-    await syncPeriodo(admin, periodo, ministros);
+    await syncPeriodo(admin, periodo, roster.ministros);
   }
 }
 
@@ -684,19 +873,44 @@ export async function listAgendasMinistrosInRange(
   rangeStart: string,
   rangeEnd: string
 ): Promise<AgendaMinistroCard[]> {
-  const { data, error } = await admin
-    .from("agendas_ministros")
-    .select(
-      "id, cgu_tipo, cgu_id, ministro_nome, cargo, orgao, tipo_registro, assunto, local, participantes, data_inicio, data_fim, hora_inicio, hora_fim, url"
-    )
-    .lte("data_inicio", rangeEnd)
-    .gte("data_fim", rangeStart)
-    .order("data_inicio", { ascending: true });
-  if (error) {
-    console.error(error.message);
-    return [];
+  const data: {
+    id: unknown;
+    cgu_tipo: unknown;
+    cgu_id: unknown;
+    ministro_nome: unknown;
+    cargo: unknown;
+    orgao: unknown;
+    tipo_registro: unknown;
+    assunto: unknown;
+    local: unknown;
+    participantes: unknown;
+    data_inicio: unknown;
+    data_fim: unknown;
+    hora_inicio: unknown;
+    hora_fim: unknown;
+    url: unknown;
+  }[] = [];
+  for (let from = 0; from < 20000; from += LIST_PAGE_SIZE) {
+    const { data: page, error } = await admin
+      .from("agendas_ministros")
+      .select(
+        "id, cgu_tipo, cgu_id, ministro_nome, cargo, orgao, tipo_registro, assunto, local, participantes, data_inicio, data_fim, hora_inicio, hora_fim, url"
+      )
+      .lte("data_inicio", rangeEnd)
+      .gte("data_fim", rangeStart)
+      .order("data_inicio", { ascending: true })
+      .order("cgu_tipo", { ascending: true })
+      .order("cgu_id", { ascending: true })
+      .range(from, from + LIST_PAGE_SIZE - 1);
+    if (error) {
+      console.error(error.message);
+      break;
+    }
+    const rows = page ?? [];
+    data.push(...rows);
+    if (rows.length < LIST_PAGE_SIZE) break;
   }
-  return (data ?? []).map((row) => ({
+  return data.map((row) => ({
     id: String(row.id),
     cguTipo: row.cgu_tipo as CguTipo,
     cguId: String(row.cgu_id),
