@@ -1,20 +1,21 @@
 import * as cheerio from "cheerio";
-import { unstable_cache } from "next/cache";
+import Parser from "rss-parser";
+import { writeUltimasSnapshot } from "@/lib/ultimas-snapshot";
 
 /**
  * Índice das reportagens publicadas em viva.com.br.
  * O portal não tem editoria "Últimas Notícias". O RSS (`/feed`) só traz as
  * 30 mais recentes — menos de um dia. As listagens de canal paginam com
- * título, linha-fina, repórter e data, e é daí que sai a semana.
+ * título, linha-fina, repórter e data, e é daí que saem os dois dias.
  */
 
 const ORIGIN = "https://viva.com.br";
 const FUSO = "America/Sao_Paulo";
 /** Brasília permanece em UTC−3 (sem horário de verão). */
 const OFFSET_BRASILIA_HORAS = 3;
-export const ULTIMAS_DIAS = 7;
+export const ULTIMAS_DIAS = 2;
 const MAX_PAGINAS_POR_CANAL = 30;
-const REVALIDATE_SEGUNDOS = 180;
+const PAGINAS_POR_LOTE = 5;
 
 const CANAIS: { slug: string; nome: string }[] = [
   { slug: "noticias", nome: "Acontece" },
@@ -79,7 +80,7 @@ function diaEmSaoPaulo(data: Date): { ano: number; mes: number; dia: number } {
   return { ano: ler("year"), mes: ler("month"), dia: ler("day") };
 }
 
-/** Meia-noite do primeiro dia do histórico (7 dias corridos, incluindo hoje). */
+/** Meia-noite do primeiro dia do histórico (dias corridos, incluindo hoje). */
 export function inicioHistoricoUltimas(agora = new Date()): Date {
   const { ano, mes, dia } = diaEmSaoPaulo(agora);
   return new Date(
@@ -192,6 +193,39 @@ async function lerPagina(url: string): Promise<string | null> {
   }
 }
 
+function incorporarListagem(
+  html: string,
+  corte: Date,
+  itens: UltimaReportagem[],
+  vistos: Set<string>
+): { acrescentou: number; passouDoCorte: boolean; vazio: boolean } {
+  const parsed = parseListagem(html);
+  if (parsed.length === 0) {
+    return { acrescentou: 0, passouDoCorte: false, vazio: true };
+  }
+
+  let acrescentou = 0;
+  let passouDoCorte = false;
+  for (const item of parsed) {
+    if (item.publicadoEm.getTime() < corte.getTime()) {
+      passouDoCorte = true;
+      continue;
+    }
+    if (vistos.has(item.link)) continue;
+    vistos.add(item.link);
+    acrescentou += 1;
+    itens.push({
+      titulo: item.titulo,
+      subtitulo: item.subtitulo,
+      link: item.link,
+      editoria: item.editoria,
+      autor: item.autor,
+      publicadoEm: item.publicadoEm.toISOString(),
+    });
+  }
+  return { acrescentou, passouDoCorte, vazio: false };
+}
+
 async function coletarCanal(
   canal: { slug: string; nome: string },
   corte: Date
@@ -199,65 +233,99 @@ async function coletarCanal(
   const itens: UltimaReportagem[] = [];
   const vistos = new Set<string>();
 
-  for (let pagina = 1; pagina <= MAX_PAGINAS_POR_CANAL; pagina += 1) {
-    const html = await lerPagina(
-      `${ORIGIN}/canal/${canal.slug}?page=${pagina}`
+  for (let inicio = 1; inicio <= MAX_PAGINAS_POR_CANAL; inicio += PAGINAS_POR_LOTE) {
+    const numeros: number[] = [];
+    for (
+      let pagina = inicio;
+      pagina < inicio + PAGINAS_POR_LOTE && pagina <= MAX_PAGINAS_POR_CANAL;
+      pagina += 1
+    ) {
+      numeros.push(pagina);
+    }
+
+    const htmls = await Promise.all(
+      numeros.map((pagina) =>
+        lerPagina(`${ORIGIN}/canal/${canal.slug}?page=${pagina}`)
+      )
     );
-    if (html == null) {
-      if (itens.length === 0) {
-        return { itens, aviso: `${canal.nome} não entrou nesta leitura.` };
+
+    for (let i = 0; i < htmls.length; i += 1) {
+      const html = htmls[i];
+      const pagina = numeros[i];
+      if (html == null) {
+        if (itens.length === 0) {
+          return { itens, aviso: `${canal.nome} não entrou nesta leitura.` };
+        }
+        return { itens, aviso: `${canal.nome} ficou incompleta nesta leitura.` };
       }
-      return {
-        itens,
-        aviso: `${canal.nome} ficou incompleta nesta leitura.`,
-      };
-    }
 
-    const parsed = parseListagem(html);
-    if (parsed.length === 0) {
-      return {
-        itens,
-        aviso:
-          pagina === 1 ? `${canal.nome} não entrou nesta leitura.` : null,
-      };
-    }
-
-    let acrescentou = 0;
-    let passouDoCorte = false;
-    for (const item of parsed) {
-      if (item.publicadoEm.getTime() < corte.getTime()) {
-        passouDoCorte = true;
-        continue;
+      const lido = incorporarListagem(html, corte, itens, vistos);
+      if (lido.vazio) {
+        return {
+          itens,
+          aviso:
+            pagina === 1 && itens.length === 0
+              ? `${canal.nome} não entrou nesta leitura.`
+              : null,
+        };
       }
-      if (vistos.has(item.link)) continue;
-      vistos.add(item.link);
-      acrescentou += 1;
-      itens.push({
-        titulo: item.titulo,
-        subtitulo: item.subtitulo,
-        link: item.link,
-        editoria: item.editoria,
-        autor: item.autor,
-        publicadoEm: item.publicadoEm.toISOString(),
-      });
+      if (!temProximaPagina(html) || lido.passouDoCorte || lido.acrescentou === 0) {
+        return { itens, aviso: null };
+      }
     }
-
-    if (!temProximaPagina(html) || passouDoCorte || acrescentou === 0) break;
   }
 
   return { itens, aviso: null };
+}
+
+async function coletarFeed(corte: Date): Promise<UltimaReportagem[]> {
+  const xml = await lerPagina(`${ORIGIN}/feed`);
+  if (!xml) return [];
+
+  let feed: Awaited<ReturnType<Parser["parseString"]>>;
+  try {
+    feed = await new Parser({ defaultRSS: 2 }).parseString(xml);
+  } catch {
+    return [];
+  }
+
+  const itens: UltimaReportagem[] = [];
+  for (const item of feed.items ?? []) {
+    const destino = linkReportagem(item.link ?? "");
+    const titulo = item.title?.replace(/\s+/g, " ").trim();
+    const bruto = item.isoDate || item.pubDate;
+    const data = bruto ? new Date(bruto) : null;
+    if (!destino || !titulo || !data || Number.isNaN(data.getTime())) continue;
+    if (data.getTime() < corte.getTime()) continue;
+    const autor =
+      typeof item.creator === "string" ? item.creator.replace(/\s+/g, " ").trim() : "";
+    const subtitulo = item.contentSnippet?.replace(/\s+/g, " ").trim() ?? "";
+    itens.push({
+      titulo,
+      subtitulo: subtitulo || null,
+      link: destino.link,
+      editoria: destino.editoria,
+      autor: autor || null,
+      publicadoEm: data.toISOString(),
+    });
+  }
+  return itens;
 }
 
 export async function coletarUltimasReportagens(
   agora = new Date()
 ): Promise<UltimasVivaResult> {
   const corte = inicioHistoricoUltimas(agora);
-  const porCanal = await Promise.all(
-    CANAIS.map((canal) => coletarCanal(canal, corte))
-  );
+  const [porCanal, doFeed] = await Promise.all([
+    Promise.all(CANAIS.map((canal) => coletarCanal(canal, corte))),
+    coletarFeed(corte),
+  ]);
 
   const porLink = new Map<string, UltimaReportagem>();
   const avisos: string[] = [];
+  for (const item of doFeed) {
+    porLink.set(item.link, item);
+  }
   for (const resultado of porCanal) {
     if (resultado.aviso) avisos.push(resultado.aviso);
     for (const item of resultado.itens) {
@@ -282,7 +350,7 @@ export async function coletarUltimasReportagens(
       ok: false,
       error: avisos.length
         ? "Não foi possível ler as reportagens publicadas no Viva."
-        : "Nenhuma reportagem publicada no Viva nos últimos 7 dias.",
+        : "Nenhuma reportagem publicada no Viva nos últimos 2 dias.",
     };
   }
 
@@ -304,30 +372,24 @@ export async function coletarUltimasReportagens(
   };
 }
 
-const lerUltimasEmCache = unstable_cache(
-  async () => {
-    const res = await coletarUltimasReportagens();
-    if (!res.ok) throw new Error(res.error);
-    return res;
-  },
-  ["viva-ultimas-v1"],
-  { revalidate: REVALIDATE_SEGUNDOS }
-);
+let emAndamento: Promise<UltimasVivaResult> | null = null;
 
-export async function listarUltimasViva(): Promise<UltimasVivaResult> {
-  try {
-    return await lerUltimasEmCache();
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "";
-    if (message.includes("Nenhuma reportagem publicada no Viva nos últimos 7 dias.")) {
-      return {
-        ok: false,
-        error: "Nenhuma reportagem publicada no Viva nos últimos 7 dias.",
-      };
-    }
-    return {
-      ok: false,
-      error: "Não foi possível ler as reportagens publicadas no Viva.",
-    };
+/**
+ * Raspa o Viva e só então grava o snapshot.
+ * A página lê o snapshot; não chama esta função.
+ */
+export async function atualizarUltimasViva(): Promise<UltimasVivaResult> {
+  if (!emAndamento) {
+    emAndamento = coletarUltimasReportagens()
+      .then(async (res): Promise<UltimasVivaResult> => {
+        if (!res.ok) return res;
+        const saved = await writeUltimasSnapshot(res);
+        if (!saved.ok) return { ok: false, error: saved.error };
+        return res;
+      })
+      .finally(() => {
+        emAndamento = null;
+      });
   }
+  return emAndamento ?? { ok: false, error: "Não foi possível atualizar as Últimas." };
 }

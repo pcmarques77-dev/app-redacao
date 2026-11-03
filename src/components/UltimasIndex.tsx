@@ -68,6 +68,14 @@ function horaAtualizacao(iso: string): string {
   }).format(new Date(iso));
 }
 
+function rotuloAtualizacao(iso: string, hoje: string): string {
+  const hora = horaAtualizacao(iso);
+  const dia = chaveDia(iso);
+  if (dia === hoje) return `atualizado às ${hora}`;
+  const [, mes, data] = dia.split("-");
+  return `atualizado em ${data}/${mes} às ${hora}`;
+}
+
 export function UltimasIndex({
   itens,
   editorias,
@@ -126,10 +134,10 @@ export function UltimasIndex({
         <p className="text-sm text-slate-600">
           <span className="font-semibold text-slate-900">{filtradas.length}</span>{" "}
           {filtradas.length === 1 ? "reportagem" : "reportagens"}
-          {editoriaAtiva || consulta ? " neste filtro" : " nos últimos 7 dias"}
+          {editoriaAtiva || consulta ? " neste filtro" : " nos últimos 2 dias"}
           <span className="text-slate-400">
             {" "}
-            · atualizado às {horaAtualizacao(atualizadoEm)}
+            · {rotuloAtualizacao(atualizadoEm, hoje)}
           </span>
         </p>
         <label className="block w-full sm:max-w-xs">

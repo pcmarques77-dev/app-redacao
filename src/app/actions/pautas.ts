@@ -16,6 +16,12 @@ import {
   type UpdatePautaPatch,
 } from "@/lib/pautas-shared";
 import {
+  dashboardEscalaQueryRange,
+  deadlineBoundsForRange,
+  defaultDashboardQueryInput,
+  type DashboardEscalaQueryInput,
+} from "@/lib/escala-query-range";
+import {
   filterUsuariosForSelects,
   reporterNomeVisivel,
 } from "@/lib/usuarios-select";
@@ -132,7 +138,9 @@ export async function listReportersForSessionAction(): Promise<
   };
 }
 
-export async function listPautasDashboardAction(): Promise<
+export async function listPautasDashboardAction(
+  input: DashboardEscalaQueryInput = defaultDashboardQueryInput()
+): Promise<
   | { ok: true; rows: PautaDashboardRow[] }
   | { ok: false; error: string }
 > {
@@ -147,6 +155,9 @@ export async function listPautasDashboardAction(): Promise<
         "Configure SUPABASE_SERVICE_ROLE_KEY no servidor para esta operação.",
     };
   }
+
+  const { rangeStart, rangeEnd } = dashboardEscalaQueryRange(input);
+  const bounds = deadlineBoundsForRange(rangeStart, rangeEnd);
 
   let q = admin
     .from("pautas")
@@ -163,6 +174,8 @@ export async function listPautasDashboardAction(): Promise<
       `
     )
     .eq("hard_news", false)
+    .gte("deadline", bounds.gte)
+    .lt("deadline", bounds.lt)
     .order("deadline", { ascending: true, nullsFirst: false });
 
   const privileged = actor.isSuperAdmin || actor.isEditor;

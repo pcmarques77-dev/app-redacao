@@ -81,6 +81,28 @@ function readAccessTokenFromCookies(request: NextRequest): string | null {
   }
 }
 
+/** Perto do vencimento, o middleware chama o Auth para renovar o cookie. */
+const ACCESS_TOKEN_REFRESH_SLACK_MS = 5 * 60 * 1000;
+
+function accessTokenExpiresAtMs(token: string): number | null {
+  try {
+    const part = token.split(".")[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
+    const payload = JSON.parse(atob(b64 + pad)) as { exp?: number };
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function accessTokenHasSlack(token: string): boolean {
+  const exp = accessTokenExpiresAtMs(token);
+  if (exp == null) return false;
+  return exp - Date.now() > ACCESS_TOKEN_REFRESH_SLACK_MS;
+}
+
 function userFromAccessToken(token: string): MiddlewareUser | null {
   try {
     const part = token.split(".")[1];
@@ -160,9 +182,17 @@ async function resolveUser(
   anonKey: string,
   onCookiesUpdated: (response: NextResponse) => void
 ): Promise<MiddlewareUser | null> {
+  const token = readAccessTokenFromCookies(request);
+
   if (!networkAuthEnabled()) {
-    const token = readAccessTokenFromCookies(request);
     return token ? userFromAccessToken(token) : null;
+  }
+
+  // Token ainda longe de expirar: a ação de servidor continua validando no Auth.
+  // Sessão revogada só cai nessa validação, ou aqui quando faltam poucos minutos.
+  if (token && accessTokenHasSlack(token)) {
+    const local = userFromAccessToken(token);
+    if (local) return local;
   }
 
   let supabaseResponse = NextResponse.next({ request });

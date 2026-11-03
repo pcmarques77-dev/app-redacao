@@ -21,6 +21,10 @@ import {
   ensureSupabaseAuthReady,
 } from "@/lib/supabase/client";
 import {
+  applyHardNewsChange,
+  asRowChange,
+} from "@/lib/dashboard-realtime";
+import {
   PAUTA_STATUSES,
   type HardNewsQueueRow,
   type PautaStatus,
@@ -98,6 +102,10 @@ export function HardNewsQueue() {
   const [filtroStatus, setFiltroStatus] = useState("Todos");
 
   const refreshRef = useRef<() => Promise<void>>(async () => {});
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const reportersRef = useRef(reporters);
+  reportersRef.current = reporters;
 
   const load = useCallback(async () => {
     const [queueRes, reportersRes] = await Promise.all([
@@ -136,7 +144,7 @@ export function HardNewsQueue() {
   useEffect(() => {
     const client = createBrowserClient();
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const trigger = () => {
+    const fallback = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         void refreshRef.current();
@@ -147,7 +155,28 @@ export function HardNewsQueue() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "pautas" },
-        trigger
+        (payload: {
+          eventType?: string;
+          new?: Record<string, unknown>;
+          old?: Record<string, unknown>;
+        }) => {
+          const change = asRowChange(payload);
+          if (!change) {
+            fallback();
+            return;
+          }
+          const next = applyHardNewsChange(
+            rowsRef.current,
+            change,
+            reportersRef.current
+          );
+          if (!next.ok) {
+            fallback();
+            return;
+          }
+          rowsRef.current = next.rows;
+          setRows(next.rows);
+        }
       );
     void ensureSupabaseAuthReady(client).then(() => {
       channel.subscribe();

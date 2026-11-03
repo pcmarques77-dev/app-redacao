@@ -20,9 +20,13 @@ import {
   canUserEditOrDeletePauta,
 } from "@/lib/admin-acl";
 import { isAgendaTipo, isNotasTipo, isStreamyardTipo } from "@/lib/escala-constants";
-import { loadDashboardAction } from "@/app/actions/dashboard";
 import {
-  listEscalasForDashboardAction,
+  listPautasPageAction,
+  loadDashboardAction,
+  type DashboardInitialData,
+  type LoadDashboardInput,
+} from "@/app/actions/dashboard";
+import {
   moveAgendaToDateAction,
   moveNotaToDateAction,
   moveStreamyardToDateAction,
@@ -33,7 +37,12 @@ import {
   listReportersForSessionAction,
   updatePautaAction,
 } from "@/app/actions/pautas";
-import type { LoadDashboardInput } from "@/app/actions/dashboard";
+import {
+  applyCalendarPautaChange,
+  applyEscalaChange,
+  applyListPautaChange,
+  asRowChange,
+} from "@/lib/dashboard-realtime";
 import {
   PAUTA_ACCESS_DENIED,
   coercePautaStatus,
@@ -41,7 +50,6 @@ import {
 } from "@/lib/pautas-shared";
 import {
   deadlineTimeOfDayMinutes,
-  deadlineYmdSortKey,
   formatDeadlinePtBR,
   parseDeadlineToYmd,
 } from "@/lib/deadline-date";
@@ -68,7 +76,12 @@ import {
   DASHBOARD_CAL_STORAGE_KEY,
   PAUTAS_DASHBOARD_HOME_EVENT,
 } from "@/lib/dashboard-home";
-import { DASHBOARD_HORIZON_DAYS } from "@/lib/escala-query-range";
+import {
+  DASHBOARD_HORIZON_DAYS,
+  PAUTAS_LIST_PAGE_SIZE,
+  dashboardEscalaQueryRange,
+  sameDashboardQuery,
+} from "@/lib/escala-query-range";
 import {
   efemerideCalendarChipClass,
   efemerideEmoji,
@@ -187,48 +200,28 @@ function reporterNome(p: PautaRow): string {
   return p.reporter?.nome?.trim() || "—";
 }
 
-function normalizeStatus(s: string | null): string {
-  return (s ?? "").trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
+function withPautaPatch(
+  rows: PautaRow[],
+  ids: Set<string>,
+  patch: (row: PautaRow) => PautaRow
+): PautaRow[] {
+  let changed = false;
+  const next = rows.map((row) => {
+    if (!ids.has(row.id)) return row;
+    changed = true;
+    return patch(row);
+  });
+  return changed ? next : rows;
 }
 
-function deadlineSortValue(p: PautaRow): number | null {
-  return deadlineYmdSortKey(p.deadline);
+function normalizeStatus(s: string | null): string {
+  return (s ?? "").trim().toLowerCase().normalize("NFD").replace(/\p{M}/gu, "");
 }
 
 function compareText(a: string | null | undefined, b: string | null | undefined): number {
   const sa = (a ?? "").trim();
   const sb = (b ?? "").trim();
   return sa.localeCompare(sb, "pt-BR", { sensitivity: "base", numeric: true });
-}
-
-function comparePautas(
-  a: PautaRow,
-  b: PautaRow,
-  column: SortColumn,
-  dir: SortDirection
-): number {
-  const mult = dir === "asc" ? 1 : -1;
-
-  switch (column) {
-    case "reporter":
-      return mult * compareText(reporterNome(a), reporterNome(b));
-    case "titulo":
-      return mult * compareText(a.titulo_provisorio, b.titulo_provisorio);
-    case "editoria":
-      return mult * compareText(a.editoria, b.editoria);
-    case "status":
-      return mult * compareText(a.status, b.status);
-    case "prazo": {
-      const ta = deadlineSortValue(a);
-      const tb = deadlineSortValue(b);
-      if (ta === null && tb === null) return 0;
-      if (ta === null) return 1;
-      if (tb === null) return -1;
-      return mult * (ta - tb);
-    }
-    default:
-      return 0;
-  }
 }
 
 function SortColumnHeader({
@@ -1283,14 +1276,22 @@ function StatusInlineSelect({
 
 export function PautasDashboard({
   headerSession = null,
+  initialDashboard = null,
 }: {
   headerSession?: PautasHeaderSession | null;
+  initialDashboard?: DashboardInitialData | null;
 }) {
   const router = useRouter();
-  const [pautas, setPautas] = useState<PautaRow[]>([]);
-  const [escalas, setEscalas] = useState<EscalaRow[]>([]);
-  const [usuariosFiltro, setUsuariosFiltro] = useState<ModalReporterOption[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [pautas, setPautas] = useState<PautaRow[]>(
+    () => (initialDashboard?.pautas ?? []) as PautaRow[]
+  );
+  const [escalas, setEscalas] = useState<EscalaRow[]>(
+    () => (initialDashboard?.escalas ?? []) as unknown as EscalaRow[]
+  );
+  const [usuariosFiltro, setUsuariosFiltro] = useState<ModalReporterOption[]>(
+    () => initialDashboard?.reporters ?? []
+  );
+  const [loading, setLoading] = useState(!initialDashboard);
   const [error, setError] = useState<string | null>(null);
   const [sortColumn, setSortColumn] = useState<SortColumn>("prazo");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -1308,7 +1309,11 @@ export function PautasDashboard({
     funcao: string | null;
     isSuperAdmin: boolean;
     isEditor: boolean;
-  } | null>(null);
+  } | null>(initialDashboard?.session ?? null);
+  const [listaRows, setListaRows] = useState<PautaRow[]>([]);
+  const [listaTotal, setListaTotal] = useState(0);
+  const [listaLoading, setListaLoading] = useState(false);
+  const [listaLoadingMore, setListaLoadingMore] = useState(false);
   const selectAllRef = useRef<HTMLInputElement>(null);
   const [viewMode, setViewMode] = useState<"lista" | "calendario">(() => {
     const p = readDashboardCalFromStorage();
@@ -1467,12 +1472,6 @@ export function PautasDashboard({
     });
   }, [pautas, filtroReporter, filtroEditoria]);
 
-  const sortedPautas = useMemo(() => {
-    const rows = [...pautasFiltradas];
-    rows.sort((a, b) => comparePautas(a, b, sortColumn, sortDirection));
-    return rows;
-  }, [pautasFiltradas, sortColumn, sortDirection]);
-
   const canManagePauta = useCallback(
     (p: PautaRow) => {
       if (!sessionCtx) return false;
@@ -1573,8 +1572,8 @@ export function PautasDashboard({
   }, [pautasFiltradas]);
 
   const idsVisiveisGerenciaveis = useMemo(
-    () => sortedPautas.filter((p) => canManagePauta(p)).map((p) => p.id),
-    [sortedPautas, canManagePauta]
+    () => listaRows.filter((p) => canManagePauta(p)).map((p) => p.id),
+    [listaRows, canManagePauta]
   );
 
   const selecionadasGerenciaveis = useMemo(() => {
@@ -1706,31 +1705,213 @@ export function PautasDashboard({
   const refreshDashboardDataRef = useRef(refreshDashboardData);
   refreshDashboardDataRef.current = refreshDashboardData;
 
+  const pautasRef = useRef(pautas);
+  pautasRef.current = pautas;
+  const escalasRef = useRef(escalas);
+  escalasRef.current = escalas;
+  const listaRowsRef = useRef(listaRows);
+  listaRowsRef.current = listaRows;
+  const listaTotalRef = useRef(listaTotal);
+  listaTotalRef.current = listaTotal;
+  const usuariosFiltroRef = useRef(usuariosFiltro);
+  usuariosFiltroRef.current = usuariosFiltro;
+  const sessionCtxRef = useRef(sessionCtx);
+  sessionCtxRef.current = sessionCtx;
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
+  const filtroReporterRef = useRef(filtroReporter);
+  filtroReporterRef.current = filtroReporter;
+  const filtroEditoriaRef = useRef(filtroEditoria);
+  filtroEditoriaRef.current = filtroEditoria;
+
+  const initialDashboardRef = useRef(initialDashboard);
   useEffect(() => {
+    const initial = initialDashboardRef.current;
+    if (
+      initial &&
+      sameDashboardQuery(escalaQueryInputRef.current, initial.query)
+    ) {
+      return;
+    }
     void load();
   }, [load]);
 
-  /** Realtime: qualquer mudança em pautas/escalas dispara recarga (debounce). */
+  const reloadLista = useCallback(async () => {
+    const limit = Math.max(PAUTAS_LIST_PAGE_SIZE, listaRowsRef.current.length);
+    const res = await listPautasPageAction({
+      offset: 0,
+      limit,
+      sortColumn,
+      sortDirection,
+      filtroReporter,
+      filtroEditoria,
+    });
+    if (!res.ok) {
+      setFeedbackErro(res.error);
+      return;
+    }
+    setListaRows(res.rows as PautaRow[]);
+    setListaTotal(res.total);
+  }, [filtroEditoria, filtroReporter, sortColumn, sortDirection]);
+
+  const reloadListaRef = useRef(reloadLista);
+  reloadListaRef.current = reloadLista;
+
+  useEffect(() => {
+    if (viewMode !== "lista") return;
+    let cancelled = false;
+    setListaLoading(true);
+    void listPautasPageAction({
+      offset: 0,
+      limit: PAUTAS_LIST_PAGE_SIZE,
+      sortColumn,
+      sortDirection,
+      filtroReporter,
+      filtroEditoria,
+    }).then((res) => {
+      if (cancelled) return;
+      if (!res.ok) {
+        setFeedbackErro(res.error);
+        setListaRows([]);
+        setListaTotal(0);
+      } else {
+        setListaRows(res.rows as PautaRow[]);
+        setListaTotal(res.total);
+      }
+      setListaLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, sortColumn, sortDirection, filtroReporter, filtroEditoria]);
+
+  const carregarMaisLista = useCallback(async () => {
+    if (listaLoadingMore || listaRows.length >= listaTotal) return;
+    setListaLoadingMore(true);
+    const res = await listPautasPageAction({
+      offset: listaRows.length,
+      limit: PAUTAS_LIST_PAGE_SIZE,
+      sortColumn,
+      sortDirection,
+      filtroReporter,
+      filtroEditoria,
+    });
+    setListaLoadingMore(false);
+    if (!res.ok) {
+      setFeedbackErro(res.error);
+      return;
+    }
+    setListaTotal(res.total);
+    setListaRows((prev) => {
+      const seen = new Set(prev.map((row) => row.id));
+      const extra = (res.rows as PautaRow[]).filter((row) => !seen.has(row.id));
+      return [...prev, ...extra];
+    });
+  }, [
+    filtroEditoria,
+    filtroReporter,
+    listaLoadingMore,
+    listaRows.length,
+    listaTotal,
+    sortColumn,
+    sortDirection,
+  ]);
+
+  /** Realtime: aplica a linha do evento. Recarrega só se o payload vier incompleto. */
   useEffect(() => {
     const client = createBrowserClient();
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const trigger = () => {
+    const fallback = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         void refreshDashboardDataRef.current();
+        if (viewModeRef.current === "lista" || listaTotalRef.current > 0) {
+          void reloadListaRef.current();
+        }
       }, 400);
+    };
+    const onPauta = (payload: {
+      eventType?: string;
+      new?: Record<string, unknown>;
+      old?: Record<string, unknown>;
+    }) => {
+      const change = asRowChange(payload);
+      if (!change) {
+        fallback();
+        return;
+      }
+      const range = dashboardEscalaQueryRange(escalaQueryInputRef.current);
+      const users = usuariosFiltroRef.current;
+      const calendar = applyCalendarPautaChange(
+        pautasRef.current,
+        change,
+        users,
+        range
+      );
+      if (!calendar.ok) {
+        fallback();
+        return;
+      }
+      pautasRef.current = calendar.rows as PautaRow[];
+      setPautas(calendar.rows as PautaRow[]);
+
+      const list = applyListPautaChange(
+        listaRowsRef.current,
+        change,
+        users,
+        {
+          filtroReporter: filtroReporterRef.current,
+          filtroEditoria: filtroEditoriaRef.current,
+          reporterNome,
+        },
+        viewModeRef.current === "lista" || listaTotalRef.current > 0
+      );
+      if (!list.ok) {
+        fallback();
+        return;
+      }
+      listaRowsRef.current = list.rows as PautaRow[];
+      setListaRows(list.rows as PautaRow[]);
+      if (list.totalDelta !== 0) {
+        setListaTotal((total) => Math.max(0, total + list.totalDelta));
+      }
+    };
+    const onEscala = (payload: {
+      eventType?: string;
+      new?: Record<string, unknown>;
+      old?: Record<string, unknown>;
+    }) => {
+      const change = asRowChange(payload);
+      if (!change) {
+        fallback();
+        return;
+      }
+      const range = dashboardEscalaQueryRange(escalaQueryInputRef.current);
+      const next = applyEscalaChange(
+        escalasRef.current,
+        change,
+        sessionCtxRef.current?.userId ?? "",
+        usuariosFiltroRef.current,
+        range
+      );
+      if (!next.ok) {
+        fallback();
+        return;
+      }
+      escalasRef.current = next.rows as EscalaRow[];
+      setEscalas(next.rows as EscalaRow[]);
     };
     const channel = client
       .channel("dashboard-cards")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "pautas" },
-        trigger
+        onPauta
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "escalas" },
-        trigger
+        onEscala
       );
     void ensureSupabaseAuthReady(client).then(() => {
       channel.subscribe();
@@ -1747,9 +1928,18 @@ export function PautasDashboard({
       return;
     }
     let cancelled = false;
-    void listEscalasForDashboardAction(escalaQueryInput).then((res) => {
-      if (cancelled || !res.ok) return;
-      setEscalas((res.rows ?? []) as unknown as EscalaRow[]);
+    void loadDashboardAction(escalaQueryInput).then((res) => {
+      if (cancelled) return;
+      if (!res.ok) {
+        setFeedbackErro(res.error);
+        return;
+      }
+      const nextPautas = res.pautas as PautaRow[];
+      const nextEscalas = (res.escalas ?? []) as unknown as EscalaRow[];
+      pautasRef.current = nextPautas;
+      escalasRef.current = nextEscalas;
+      setPautas(nextPautas);
+      setEscalas(nextEscalas);
     });
     return () => {
       cancelled = true;
@@ -1853,19 +2043,22 @@ export function PautasDashboard({
         : [];
       const targetIds = selectedTargets.length > 0 ? selectedTargets : [id];
       const targetSet = new Set(targetIds);
-      const previousStatusById = new Map(
-        pautas
-          .filter((p) => targetSet.has(p.id))
-          .map((p) => [p.id, p.status] as const)
-      );
+      const previousStatusById = new Map<string, PautaStatus>();
+      for (const row of pautas) {
+        if (targetSet.has(row.id)) previousStatusById.set(row.id, row.status);
+      }
+      for (const row of listaRows) {
+        if (targetSet.has(row.id)) previousStatusById.set(row.id, row.status);
+      }
 
       if (targetIds.length === 1) {
         setFeedbackErro(null);
       }
 
-      setPautas((rows) =>
-        rows.map((p) => (targetSet.has(p.id) ? { ...p, status: newStatus } : p))
-      );
+      const applyStatus = (rows: PautaRow[]) =>
+        withPautaPatch(rows, targetSet, (p) => ({ ...p, status: newStatus }));
+      setPautas(applyStatus);
+      setListaRows(applyStatus);
       setStatusSavingId(id);
 
       const results = await Promise.all(
@@ -1880,13 +2073,13 @@ export function PautasDashboard({
       const failed = results.filter((r) => !r.upRes.ok);
       if (failed.length > 0) {
         const failedIds = new Set(failed.map((r) => r.id));
-        setPautas((rows) =>
-          rows.map((p) =>
-            failedIds.has(p.id)
-              ? { ...p, status: previousStatusById.get(p.id) ?? p.status }
-              : p
-          )
-        );
+        const rollback = (rows: PautaRow[]) =>
+          withPautaPatch(rows, failedIds, (p) => ({
+            ...p,
+            status: previousStatusById.get(p.id) ?? p.status,
+          }));
+        setPautas(rollback);
+        setListaRows(rollback);
         if (targetIds.length === 1) {
           const failed0 = failed[0];
           const firstError =
@@ -1899,7 +2092,7 @@ export function PautasDashboard({
         }
       }
     },
-    [pautas, selecionadasGerenciaveis]
+    [listaRows, pautas, selecionadasGerenciaveis]
   );
 
   const handleCalendarStatusChange = useCallback(
@@ -1910,17 +2103,20 @@ export function PautasDashboard({
       const previous = row.status;
       if (previous === newStatus) return;
 
-      setPautas((rows) =>
-        rows.map((p) => (p.id === id ? { ...p, status: newStatus } : p))
-      );
+      const ids = new Set([id]);
+      const applyStatus = (rows: PautaRow[]) =>
+        withPautaPatch(rows, ids, (p) => ({ ...p, status: newStatus }));
+      setPautas(applyStatus);
+      setListaRows(applyStatus);
       setStatusSavingId(id);
       const upRes = await updatePautaAction(id, { status: newStatus });
       setStatusSavingId(null);
 
       if (!upRes.ok) {
-        setPautas((rows) =>
-          rows.map((p) => (p.id === id ? { ...p, status: previous } : p))
-        );
+        const rollback = (rows: PautaRow[]) =>
+          withPautaPatch(rows, ids, (p) => ({ ...p, status: previous }));
+        setPautas(rollback);
+        setListaRows(rollback);
         setFeedbackErro(
           upRes.error === PAUTA_ACCESS_DENIED
             ? PAUTA_ACCESS_DENIED
@@ -1936,17 +2132,21 @@ export function PautasDashboard({
       const ymd = novaData.trim();
       if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return;
       setFeedbackErro(null);
-      const row = pautas.find((p) => p.id === pautaId);
+      const row =
+        listaRows.find((p) => p.id === pautaId) ??
+        pautas.find((p) => p.id === pautaId);
       if (!row) return;
 
       const prevYmd = parseDeadlineToYmd(row.deadline);
       if (prevYmd === ymd) return;
 
       const previousDeadline = row.deadline;
+      const ids = new Set([pautaId]);
+      const applyDeadline = (rows: PautaRow[]) =>
+        withPautaPatch(rows, ids, (p) => ({ ...p, deadline: ymd }));
 
-      setPautas((ps) =>
-        ps.map((p) => (p.id === pautaId ? { ...p, deadline: ymd } : p))
-      );
+      setPautas(applyDeadline);
+      setListaRows(applyDeadline);
       setDeadlineSavingId(pautaId);
 
       const upRes = await updatePautaAction(pautaId, { deadline: ymd });
@@ -1954,11 +2154,13 @@ export function PautasDashboard({
       setDeadlineSavingId(null);
 
       if (!upRes.ok) {
-        setPautas((ps) =>
-          ps.map((p) =>
-            p.id === pautaId ? { ...p, deadline: previousDeadline } : p
-          )
-        );
+        const rollbackDeadline = (rows: PautaRow[]) =>
+          withPautaPatch(rows, ids, (p) => ({
+            ...p,
+            deadline: previousDeadline,
+          }));
+        setPautas(rollbackDeadline);
+        setListaRows(rollbackDeadline);
         setFeedbackErro(
           upRes.error === PAUTA_ACCESS_DENIED
             ? PAUTA_ACCESS_DENIED
@@ -1966,7 +2168,7 @@ export function PautasDashboard({
         );
       }
     },
-    [pautas]
+    [listaRows, pautas]
   );
 
   const handleCalendarDeadlineDrop = useCallback(
@@ -1977,19 +2179,23 @@ export function PautasDashboard({
       if (parseDeadlineToYmd(row.deadline) === targetYmd) return;
 
       const previousDeadline = row.deadline;
+      const ids = new Set([pautaId]);
+      const applyDeadline = (rows: PautaRow[]) =>
+        withPautaPatch(rows, ids, (p) => ({ ...p, deadline: targetYmd }));
 
-      setPautas((ps) =>
-        ps.map((p) => (p.id === pautaId ? { ...p, deadline: targetYmd } : p))
-      );
+      setPautas(applyDeadline);
+      setListaRows(applyDeadline);
 
       const upRes = await updatePautaAction(pautaId, { deadline: targetYmd });
 
       if (!upRes.ok) {
-        setPautas((ps) =>
-          ps.map((p) =>
-            p.id === pautaId ? { ...p, deadline: previousDeadline } : p
-          )
-        );
+        const rollbackDeadline = (rows: PautaRow[]) =>
+          withPautaPatch(rows, ids, (p) => ({
+            ...p,
+            deadline: previousDeadline,
+          }));
+        setPautas(rollbackDeadline);
+        setListaRows(rollbackDeadline);
         setFeedbackErro(
           upRes.error === PAUTA_ACCESS_DENIED
             ? PAUTA_ACCESS_DENIED
@@ -2485,17 +2691,15 @@ export function PautasDashboard({
             </div>
           )}
 
-          {viewMode === "lista" && sortedPautas.length === 0 && (
+          {viewMode === "lista" && (listaLoading || listaRows.length === 0) && (
             <div className="mb-6 rounded-lg border border-dashed border-slate-300 bg-white px-6 py-12 text-center text-slate-500">
-              {pautas.length === 0
-                ? "Nenhuma pauta encontrada."
-                : "Nenhuma pauta corresponde aos filtros selecionados."}
+              {listaLoading ? "Carregando pautas..." : "Nenhuma pauta encontrada."}
             </div>
           )}
 
-          {(viewMode === "calendario" || sortedPautas.length > 0) && (
+          {(viewMode === "calendario" || listaRows.length > 0) && (
             <>
-          {viewMode === "lista" && sortedPautas.length > 0 && (
+          {viewMode === "lista" && listaRows.length > 0 && (
           <>
           <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm md:block">
             <div className="overflow-x-auto">
@@ -2558,7 +2762,7 @@ export function PautasDashboard({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {sortedPautas.map((p) => (
+                  {listaRows.map((p) => (
                     <tr
                       key={p.id}
                       className="hover:bg-slate-50/80"
@@ -2628,7 +2832,7 @@ export function PautasDashboard({
           </div>
 
           <ul className="space-y-4 md:hidden" aria-label="Lista de pautas">
-            {sortedPautas.map((p) => (
+            {listaRows.map((p) => (
               <li
                 key={`card-${p.id}`}
                 className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
@@ -2716,6 +2920,20 @@ export function PautasDashboard({
               </li>
             ))}
           </ul>
+          {listaRows.length < listaTotal && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => void carregarMaisLista()}
+                disabled={listaLoadingMore}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {listaLoadingMore
+                  ? "Carregando…"
+                  : `Carregar mais (${listaRows.length} de ${listaTotal})`}
+              </button>
+            </div>
+          )}
           </>
           )}
 

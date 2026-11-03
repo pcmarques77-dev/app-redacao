@@ -1,5 +1,6 @@
 "use server";
 
+import { cache } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { isEditorRole, isSuperAdminEmail } from "@/lib/admin-acl";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -37,8 +38,11 @@ function getServiceClient() {
   });
 }
 
-/** Sessão + função em `public.usuarios` (via service role, ignora RLS). */
-export async function getAdminActor(): Promise<AdminActor> {
+/**
+ * Sessão + função em `public.usuarios` (via service role, ignora RLS).
+ * `cache()` junta chamadas do mesmo request (cabeçalho e dados da página).
+ */
+const loadAdminActor = cache(async (): Promise<AdminActor> => {
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
@@ -103,6 +107,10 @@ export async function getAdminActor(): Promise<AdminActor> {
     isSuperAdmin,
     isEditor,
   };
+});
+
+export async function getAdminActor(): Promise<AdminActor> {
+  return loadAdminActor();
 }
 
 export type SessionPrivileges = {

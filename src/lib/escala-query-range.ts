@@ -64,6 +64,44 @@ export function ymdAddDays(ymd: string, days: number): string {
 export const DASHBOARD_HORIZON_WEEKS = 4;
 export const DASHBOARD_HORIZON_DAYS = DASHBOARD_HORIZON_WEEKS * 7;
 
+/** Página da vista de lista. O calendário não usa este limite. */
+export const PAUTAS_LIST_PAGE_SIZE = 40;
+
+/** Segunda-feira da semana local de `from` (hora zerada). */
+export function startOfWeekMondayLocal(from: Date): Date {
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const mondayIndex = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - mondayIndex);
+  return d;
+}
+
+/**
+ * Data civil em São Paulo, como `Date` local.
+ * O servidor (UTC) e o navegador da redação passam a cair na mesma semana.
+ */
+export function dateInSaoPaulo(now = new Date()): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const pick = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+  return new Date(
+    pick("year"),
+    pick("month") - 1,
+    pick("day"),
+    pick("hour"),
+    pick("minute"),
+    pick("second")
+  );
+}
+
 export type DashboardEscalaQueryInput = {
   year: number;
   monthIndex: number;
@@ -95,4 +133,42 @@ export function dashboardEscalaQueryRange(
     }
   }
   return plannerQueryRangeYm(input.year, input.monthIndex);
+}
+
+/** Recorte inicial do calendário: semana corrente em São Paulo, sem arquivo. */
+export function defaultDashboardQueryInput(now = new Date()): DashboardEscalaQueryInput {
+  const monday = startOfWeekMondayLocal(dateInSaoPaulo(now));
+  return {
+    year: monday.getFullYear(),
+    monthIndex: monday.getMonth(),
+    horizonStartYmd: dateToYmdLocal(monday),
+    archive: false,
+  };
+}
+
+export function sameDashboardQuery(
+  a: DashboardEscalaQueryInput,
+  b: DashboardEscalaQueryInput
+): boolean {
+  return (
+    a.year === b.year &&
+    a.monthIndex === b.monthIndex &&
+    Boolean(a.archive) === Boolean(b.archive) &&
+    (a.horizonStartYmd ?? "") === (b.horizonStartYmd ?? "")
+  );
+}
+
+/**
+ * Limites UTC do prazo (`timestamptz`) para o intervalo civil YYYY-MM-DD.
+ * O fim é exclusivo (dia seguinte) para não cortar horários do último dia.
+ * O dia civil usado na grade é o prefixo ISO, o mesmo recorte daqui.
+ */
+export function deadlineBoundsForRange(
+  rangeStart: string,
+  rangeEnd: string
+): { gte: string; lt: string } {
+  return {
+    gte: `${rangeStart}T00:00:00.000Z`,
+    lt: `${ymdAddDays(rangeEnd, 1)}T00:00:00.000Z`,
+  };
 }
