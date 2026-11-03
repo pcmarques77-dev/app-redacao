@@ -372,19 +372,28 @@ export async function coletarUltimasReportagens(
   };
 }
 
+/** Releitura no mesmo processo. Evita raspar de novo quem abre a página em seguida. */
+const REVALIDATE_MS = 180_000;
+
+let memoria: { expira: number; valor: UltimasVivaOk } | null = null;
 let emAndamento: Promise<UltimasVivaResult> | null = null;
 
 /**
- * Raspa o Viva e só então grava o snapshot.
- * A página lê o snapshot; não chama esta função.
+ * Lê o Viva agora. A página chama isto ao abrir.
+ * O snapshot só é gravado depois que a coleta termina, e uma falha ao gravar
+ * não esconde o índice que acabou de ser lido.
  */
 export async function atualizarUltimasViva(): Promise<UltimasVivaResult> {
+  if (memoria && memoria.expira > Date.now()) return memoria.valor;
   if (!emAndamento) {
     emAndamento = coletarUltimasReportagens()
       .then(async (res): Promise<UltimasVivaResult> => {
         if (!res.ok) return res;
         const saved = await writeUltimasSnapshot(res);
-        if (!saved.ok) return { ok: false, error: saved.error };
+        if (!saved.ok) {
+          console.error("[ultimas]", saved.error);
+        }
+        memoria = { expira: Date.now() + REVALIDATE_MS, valor: res };
         return res;
       })
       .finally(() => {
