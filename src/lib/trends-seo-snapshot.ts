@@ -25,9 +25,11 @@ function parsePayload(raw: unknown): TrendsSeoAgregadoOk | null {
   const noticias = o.noticias.filter(isTrendItem);
   const total = typeof o.total === "number" ? o.total : noticias.length;
   const fonte =
-    o.fonte === "google-trends-batchexecute" || o.fonte === "google-trends-rss"
+    o.fonte === "google-trends-pagina" ||
+    o.fonte === "google-trends-batchexecute" ||
+    o.fonte === "google-trends-rss"
       ? o.fonte
-      : "google-trends-batchexecute";
+      : "google-trends-pagina";
 
   return {
     ok: true,

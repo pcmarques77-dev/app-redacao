@@ -4,7 +4,11 @@ import Parser from "rss-parser";
 export const TRENDS_SEO_RSS_URL =
   "https://trends.google.com/trending/rss?geo=BR";
 
-/** RPC interno da página /trending (lista longa). */
+/** Página “Em alta” (a lista de 24 horas vem no HTML). */
+export const TRENDS_SEO_PAGE_URL =
+  "https://trends.google.com/trending?geo=BR&hl=pt-BR";
+
+/** RPC interno da página /trending. O Google passou a recusar esta chamada sem sessão. */
 export const TRENDS_SEO_BATCHEXECUTE_URL =
   "https://trends.google.com/_/TrendsUi/data/batchexecute?rpcids=i0OFE&source-path=%2Ftrending&hl=pt-BR";
 
@@ -51,7 +55,10 @@ export type TrendsSeoAgregadoOk = {
   noticias: TrendSeoItem[];
   total: number;
   geo: "BR";
-  fonte: "google-trends-batchexecute" | "google-trends-rss";
+  fonte:
+    | "google-trends-pagina"
+    | "google-trends-batchexecute"
+    | "google-trends-rss";
 };
 
 type TrendsRssItem = {
@@ -136,56 +143,56 @@ function looksLikeSportsTerm(titulo: string): boolean {
   return false;
 }
 
-function extractBatchexecuteList(raw: string): unknown[] {
-  const cleaned = raw.replace(/^\)\]\}'\s*/, "").trim();
-  const parsed = JSON.parse(cleaned) as unknown;
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new Error("Resposta batchexecute inválida.");
+const TRENDS_BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+/** Recorta um array ou objeto JSON, respeitando strings. */
+function sliceJsonValue(source: string, start: number): string {
+  const stack: string[] = [];
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "[" || ch === "{") stack.push(ch === "[" ? "]" : "}");
+    else if (ch === "]" || ch === "}") {
+      if (stack.pop() !== ch) {
+        throw new Error("JSON da página do Trends desbalanceado.");
+      }
+      if (stack.length === 0) return source.slice(start, i + 1);
+    }
   }
-  const first = parsed[0];
-  if (!Array.isArray(first) || typeof first[2] !== "string") {
-    throw new Error("Payload batchexecute sem dados aninhados.");
-  }
-  const nested = JSON.parse(first[2]) as unknown;
-  if (!Array.isArray(nested) || !Array.isArray(nested[1])) {
-    throw new Error("Lista de tendências ausente no batchexecute.");
-  }
-  return nested[1] as unknown[];
+  throw new Error("JSON da página do Trends incompleto.");
 }
 
-async function agregarViaBatchexecute(): Promise<TrendsSeoAgregadoOk> {
-  const fReq = JSON.stringify([
-    [
-      [
-        "i0OFE",
-        JSON.stringify([null, null, "BR", 0, "pt", TRENDS_SEO_HOURS, 1]),
-        null,
-        "generic",
-      ],
-    ],
-  ]);
-
-  const body = new URLSearchParams({ "f.req": fReq }).toString();
-  const res = await fetch(TRENDS_SEO_BATCHEXECUTE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-      "User-Agent":
-        "Mozilla/5.0 (compatible; AppRedacaoTrends/1.0; +https://localhost)",
-      Origin: "https://trends.google.com",
-      Referer: "https://trends.google.com/trending?geo=BR&hl=pt-BR",
-      Accept: "*/*",
-    },
-    body,
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    throw new Error(`Google Trends batchexecute HTTP ${res.status}`);
+function extractTrendingList(html: string): unknown[] {
+  const marker = "AF_initDataCallback({key: 'ds:0'";
+  const start = html.indexOf(marker);
+  if (start < 0) {
+    throw new Error("Lista de tendências ausente na página.");
   }
+  const dataAt = html.indexOf("data:", start);
+  const bracket = dataAt >= 0 ? html.indexOf("[", dataAt) : -1;
+  if (bracket < 0) {
+    throw new Error("Campo data ausente na página do Trends.");
+  }
+  const data = JSON.parse(sliceJsonValue(html, bracket)) as unknown;
+  if (!Array.isArray(data) || !Array.isArray(data[1])) {
+    throw new Error("Lista de tendências ausente na página.");
+  }
+  return data[1] as unknown[];
+}
 
-  const text = await res.text();
-  const list = extractBatchexecuteList(text);
+function noticiasFromTrendRows(list: unknown[]): TrendSeoItem[] {
   const capturedAt = new Date().toISOString();
   const seen = new Set<string>();
   const noticias: TrendSeoItem[] = [];
@@ -229,7 +236,89 @@ async function agregarViaBatchexecute(): Promise<TrendsSeoAgregadoOk> {
     });
   }
 
-  const limited = sortAndLimit(noticias);
+  return noticias;
+}
+
+function extractBatchexecuteList(raw: string): unknown[] {
+  const cleaned = raw.replace(/^\)\]\}'\s*/, "").trim();
+  const parsed = JSON.parse(cleaned) as unknown;
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error("Resposta batchexecute inválida.");
+  }
+  const first = parsed[0];
+  if (!Array.isArray(first) || typeof first[2] !== "string") {
+    throw new Error("Payload batchexecute sem dados aninhados.");
+  }
+  const nested = JSON.parse(first[2]) as unknown;
+  if (!Array.isArray(nested) || !Array.isArray(nested[1])) {
+    throw new Error("Lista de tendências ausente no batchexecute.");
+  }
+  return nested[1] as unknown[];
+}
+
+async function agregarViaPagina(): Promise<TrendsSeoAgregadoOk> {
+  const res = await fetch(TRENDS_SEO_PAGE_URL, {
+    headers: {
+      "User-Agent": TRENDS_BROWSER_UA,
+      Accept: "text/html,application/xhtml+xml",
+      "Accept-Language": "pt-BR,pt;q=0.9",
+    },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`Google Trends página HTTP ${res.status}`);
+  }
+
+  const limited = sortAndLimit(
+    noticiasFromTrendRows(extractTrendingList(await res.text()))
+  );
+  if (limited.length === 0) {
+    throw new Error("Google Trends página retornou 0 itens.");
+  }
+
+  return {
+    ok: true,
+    noticias: limited,
+    total: limited.length,
+    geo: "BR",
+    fonte: "google-trends-pagina",
+  };
+}
+
+async function agregarViaBatchexecute(): Promise<TrendsSeoAgregadoOk> {
+  const fReq = JSON.stringify([
+    [
+      [
+        "i0OFE",
+        JSON.stringify([null, null, "BR", 0, "pt", TRENDS_SEO_HOURS, 1]),
+        null,
+        "generic",
+      ],
+    ],
+  ]);
+
+  const body = new URLSearchParams({ "f.req": fReq }).toString();
+  const res = await fetch(TRENDS_SEO_BATCHEXECUTE_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+      "User-Agent": TRENDS_BROWSER_UA,
+      Origin: "https://trends.google.com",
+      Referer: "https://trends.google.com/trending?geo=BR&hl=pt-BR",
+      Accept: "*/*",
+    },
+    body,
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    throw new Error(`Google Trends batchexecute HTTP ${res.status}`);
+  }
+
+  const limited = sortAndLimit(
+    noticiasFromTrendRows(extractBatchexecuteList(await res.text()))
+  );
   if (limited.length === 0) {
     throw new Error("Google Trends batchexecute retornou 0 itens.");
   }
@@ -302,6 +391,14 @@ async function agregarViaRss(): Promise<TrendsSeoAgregadoOk> {
 
 /** Busca e normaliza os assuntos em alta no Brasil (descoberta SEO). */
 export async function agregarTrendsSeo(): Promise<TrendsSeoAgregadoOk> {
+  try {
+    return await agregarViaPagina();
+  } catch (pageError) {
+    console.warn(
+      "[trends-seo] página falhou; tentando batchexecute.",
+      pageError instanceof Error ? pageError.message : pageError
+    );
+  }
   try {
     return await agregarViaBatchexecute();
   } catch (e) {
