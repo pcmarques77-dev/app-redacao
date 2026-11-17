@@ -120,6 +120,7 @@ function AdminUsuariosPageContent({
   const [editSenha, setEditSenha] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [editDataCriacao, setEditDataCriacao] = useState("");
+  const [editOcultoLista, setEditOcultoLista] = useState(false);
   const [salvandoEdicao, setSalvandoEdicao] = useState(false);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -176,9 +177,11 @@ function AdminUsuariosPageContent({
   }, []);
 
   const isSuperUi = isSuperAdminEmail(currentUserEmail);
-  const canCreateUser = isSuperUi || isEditorRole(currentUserRole);
+  const isEditorUi = isEditorRole(currentUserRole);
+  const canCreateUser = isSuperUi || isEditorUi;
+  const canToggleOcultoLista = canCreateUser;
   const canEditRow = (r: UsuarioTableRow) =>
-    isSuperUi || r.id === currentUserId;
+    isSuperUi || isEditorUi || r.id === currentUserId;
 
   const openEdit = useCallback((row: UsuarioTableRow) => {
     setEditing(row);
@@ -188,6 +191,7 @@ function AdminUsuariosPageContent({
     setEditSenha("");
     setMostrarSenha(false);
     setEditDataCriacao(isoToDatetimeLocalValue(row.data_criacao));
+    setEditOcultoLista(row.oculto_lista_jornalistas === true);
     setBanner(null);
   }, []);
 
@@ -259,6 +263,7 @@ function AdminUsuariosPageContent({
         funcao: editFuncao,
         data_criacao: editDataCriacao,
         senha: editSenha,
+        oculto_lista_jornalistas: editOcultoLista,
       });
       setSalvandoEdicao(false);
       if (!res.ok) {
@@ -270,7 +275,7 @@ function AdminUsuariosPageContent({
       setEditing(null);
       void refreshRows();
     },
-    [editing, editNome, editEmail, editFuncao, editSenha, editDataCriacao, refreshRows]
+    [editing, editNome, editEmail, editFuncao, editSenha, editDataCriacao, editOcultoLista, refreshRows]
   );
 
   const handleExcluir = useCallback(
@@ -376,6 +381,11 @@ function AdminUsuariosPageContent({
                             <span className="line-clamp-2 break-words font-medium text-slate-900">
                               {r.nome?.trim() || "—"}
                             </span>
+                            {r.oculto_lista_jornalistas ? (
+                              <span className="mt-1 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                                Oculto na lista
+                              </span>
+                            ) : null}
                           </td>
                           <td className="px-3 py-2.5 align-middle sm:px-4">
                             <span className="line-clamp-2 break-all text-slate-700">
@@ -446,9 +456,10 @@ function AdminUsuariosPageContent({
                     id="edit-nome"
                     type="text"
                     required
+                    disabled={!isSuperUi && editing.id !== currentUserId}
                     value={editNome}
                     onChange={(e) => setEditNome(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
                   />
                 </div>
                 <div>
@@ -483,6 +494,27 @@ function AdminUsuariosPageContent({
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
                   />
                 </div>
+                {canToggleOcultoLista ? (
+                  <div>
+                    <label className="flex items-start gap-2 text-sm text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={editOcultoLista}
+                        onChange={(e) => setEditOcultoLista(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+                      />
+                      <span>
+                        <span className="font-medium">
+                          Ocultar da lista de jornalistas
+                        </span>
+                        <span className="mt-1 block text-xs font-normal text-slate-500">
+                          Some dos seletores e do filtro do calendário. Pautas
+                          e escalas já atribuídas continuam com o nome.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                ) : null}
                 <div>
                   <label
                     htmlFor="edit-senha"
@@ -497,7 +529,8 @@ function AdminUsuariosPageContent({
                       autoComplete="new-password"
                       value={editSenha}
                       onChange={(e) => setEditSenha(e.target.value)}
-                      className="w-full rounded-lg border border-slate-300 py-2 pl-3 pr-10 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25"
+                      disabled={!isSuperUi && editing.id !== currentUserId}
+                      className="w-full rounded-lg border border-slate-300 py-2 pl-3 pr-10 font-mono text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/25 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600"
                       placeholder="Opcional"
                     />
                     <button

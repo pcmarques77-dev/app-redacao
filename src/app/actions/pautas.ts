@@ -127,7 +127,7 @@ export async function listReportersForSessionAction(): Promise<
 
   const { data, error } = await admin
     .from("usuarios")
-    .select("id, nome, email")
+    .select("id, nome, email, oculto_lista_jornalistas")
     .order("nome", { ascending: true });
 
   if (error) {

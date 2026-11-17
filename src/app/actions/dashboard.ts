@@ -164,7 +164,7 @@ export async function loadDashboardAction(
     privileged
       ? admin
           .from("usuarios")
-          .select("id, nome, email")
+          .select("id, nome, email, oculto_lista_jornalistas")
           .order("nome", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
   ]);

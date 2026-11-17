@@ -29,10 +29,37 @@ export function isHiddenOperationalUsuario(args: {
   return isHiddenFromUsuarioSelects(args.nome);
 }
 
+export function isOcultoListaJornalistas(value: unknown): boolean {
+  return value === true;
+}
+
 export function filterUsuariosForSelects<
-  T extends { nome: string | null; email?: string | null },
+  T extends {
+    nome: string | null;
+    email?: string | null;
+    oculto_lista_jornalistas?: boolean | null;
+  },
 >(rows: T[]): T[] {
-  return rows.filter((r) => !isHiddenOperationalUsuario(r));
+  return rows.filter(
+    (r) =>
+      !isHiddenOperationalUsuario(r) &&
+      !isOcultoListaJornalistas(r.oculto_lista_jornalistas)
+  );
+}
+
+/**
+ * Mantém na lista quem já está atribuído, mesmo oculto, para a edição
+ * não trocar o jornalista sem querer.
+ */
+export function withAssignedUsuario<T extends { id: string; nome: string | null }>(
+  rows: T[],
+  assignedId: string | null | undefined,
+  assignedNome?: string | null
+): T[] {
+  const id = (assignedId ?? "").trim();
+  if (!id || rows.some((row) => row.id === id)) return rows;
+  const nome = assignedNome?.trim() || "Jornalista oculto";
+  return [...rows, { id, nome } as T];
 }
 
 /**

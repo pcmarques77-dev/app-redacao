@@ -29,6 +29,7 @@ import {
 } from "@/lib/pautas-shared";
 import { parseDeadlineToYmd } from "@/lib/deadline-date";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
+import { withAssignedUsuario } from "@/lib/usuarios-select";
 import { MultimidiaField } from "@/components/MultimidiaField";
 
 type ReporterOption = {
@@ -89,6 +90,11 @@ export default function EditarPauta() {
       pautaReporterId: rowReporterId,
     });
   }, [sessionCtx, rowReporterId]);
+
+  const reporterOptions = useMemo(
+    () => withAssignedUsuario(reporters, reporterId),
+    [reporters, reporterId]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -408,7 +414,7 @@ export default function EditarPauta() {
                     className="mt-1 w-full rounded-md border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:bg-slate-50"
                   >
                     <option value="">Selecione o jornalista</option>
-                    {reporters.map((r) => (
+                    {reporterOptions.map((r) => (
                       <option key={r.id} value={r.id}>
                         {r.nome?.trim() || "Sem nome"}
                       </option>

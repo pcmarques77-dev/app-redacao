@@ -5,12 +5,14 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
 } from "react";
 import { deleteEscala, saveEscalaAction } from "@/app/actions/escalas";
 import { listReportersForSessionAction } from "@/app/actions/pautas";
+import { withAssignedUsuario } from "@/lib/usuarios-select";
 
 import {
   ESCALA_TIPO_FERIADO,
@@ -222,6 +224,10 @@ export function EscalaForm({
   const [tipo, setTipo] = useState(() => readInitial(initialEscala).tipo);
   const [usuarioId, setUsuarioId] = useState(
     () => readInitial(initialEscala).usuarioId
+  );
+  const usuarioOptions = useMemo(
+    () => withAssignedUsuario(usuarios, usuarioId),
+    [usuarios, usuarioId]
   );
   const [nomeFeriado, setNomeFeriado] = useState(
     () => readInitial(initialEscala).nomeFeriado
@@ -590,7 +596,7 @@ export function EscalaForm({
           className="mt-1 w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
         >
           <option value="">Selecione…</option>
-          {usuarios.map((u) => (
+          {usuarioOptions.map((u) => (
             <option key={u.id} value={u.id}>
               {u.nome?.trim() || "Sem nome"}
             </option>

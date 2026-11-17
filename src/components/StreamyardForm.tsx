@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -16,6 +17,7 @@ import {
   ESCALA_TIPO_STREAMYARD,
   normalizeHorarioForTimeInput,
 } from "@/lib/escala-constants";
+import { withAssignedUsuario } from "@/lib/usuarios-select";
 
 export type StreamyardUsuarioOption = {
   id: string;
@@ -70,6 +72,10 @@ export function StreamyardForm({
     }
     return "";
   });
+  const usuarioOptions = useMemo(
+    () => withAssignedUsuario(usuarios, usuarioId),
+    [usuarios, usuarioId]
+  );
   const [horario, setHorario] = useState(() =>
     normalizeHorarioForTimeInput(initialStreamyard?.horario)
   );
@@ -202,7 +208,7 @@ export function StreamyardForm({
             className="mt-1 w-full rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-[10px] text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-70"
           >
             <option value="">Selecione…</option>
-            {usuarios.map((u) => (
+            {usuarioOptions.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.nome?.trim() || "Sem nome"}
               </option>

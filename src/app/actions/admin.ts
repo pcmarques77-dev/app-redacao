@@ -12,6 +12,7 @@ export type UsuarioTableRow = {
   email: string | null;
   funcao: string | null;
   data_criacao: string | null;
+  oculto_lista_jornalistas: boolean;
 };
 
 export type AdminActor =
@@ -165,7 +166,7 @@ export async function listUsuariosTableAction(): Promise<
 
   let q = admin
     .from("usuarios")
-    .select("id, nome, email, funcao, data_criacao")
+    .select("id, nome, email, funcao, data_criacao, oculto_lista_jornalistas")
     .order("nome", { ascending: true });
 
   if (!actor.isSuperAdmin && !actor.isEditor) {
@@ -178,7 +179,12 @@ export async function listUsuariosTableAction(): Promise<
     return { ok: false, error: error.message };
   }
 
-  const rows = ((data ?? []) as UsuarioTableRow[]).filter(
+  const rows = ((data ?? []) as (Omit<UsuarioTableRow, "oculto_lista_jornalistas"> & {
+    oculto_lista_jornalistas?: boolean | null;
+  })[]).map((row) => ({
+    ...row,
+    oculto_lista_jornalistas: row.oculto_lista_jornalistas === true,
+  })).filter(
     (row) => !isSuperAdminEmail(row.email)
   );
 
@@ -249,19 +255,11 @@ export async function updateUsuariosRowAction(
     funcao: string;
     data_criacao: string;
     senha?: string;
+    oculto_lista_jornalistas?: boolean;
   }
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const actor = await getAdminActor();
   if (!actor.ok) return { ok: false, error: actor.error };
-
-  const nome = payload.nome.trim();
-  if (!nome) {
-    return { ok: false, error: "O nome é obrigatório." };
-  }
-
-  if (!actor.isSuperAdmin && id !== actor.userId) {
-    return { ok: false, error: "Acesso negado." };
-  }
 
   const admin = getServiceClient();
   if (!admin) {
@@ -273,6 +271,28 @@ export async function updateUsuariosRowAction(
   }
 
   const senhaNova = payload.senha?.trim() ?? "";
+  const canSetOculto = actor.isSuperAdmin || actor.isEditor;
+  const ocultoLista = payload.oculto_lista_jornalistas === true;
+
+  if (!actor.isSuperAdmin && id !== actor.userId) {
+    if (!actor.isEditor) {
+      return { ok: false, error: "Acesso negado." };
+    }
+    const { error } = await admin
+      .from("usuarios")
+      .update({ oculto_lista_jornalistas: ocultoLista })
+      .eq("id", id);
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    return { ok: true };
+  }
+
+  const nome = payload.nome.trim();
+  if (!nome) {
+    return { ok: false, error: "O nome é obrigatório." };
+  }
+
   if (senhaNova) {
     if (senhaNova.length < 6) {
       return {
@@ -301,14 +321,19 @@ export async function updateUsuariosRowAction(
       data_criacao = d.toISOString();
     }
 
+    const updateRow: Record<string, unknown> = {
+      nome,
+      email,
+      funcao,
+      data_criacao,
+    };
+    if (canSetOculto) {
+      updateRow.oculto_lista_jornalistas = ocultoLista;
+    }
+
     const { error } = await admin
       .from("usuarios")
-      .update({
-        nome,
-        email,
-        funcao,
-        data_criacao,
-      })
+      .update(updateRow)
       .eq("id", id);
 
     if (error) {
@@ -328,14 +353,19 @@ export async function updateUsuariosRowAction(
       return { ok: false, error: "Registro não encontrado." };
     }
 
+    const updateRow: Record<string, unknown> = {
+      nome,
+      email: existing.email,
+      funcao: existing.funcao,
+      data_criacao: existing.data_criacao,
+    };
+    if (canSetOculto) {
+      updateRow.oculto_lista_jornalistas = ocultoLista;
+    }
+
     const { error } = await admin
       .from("usuarios")
-      .update({
-        nome,
-        email: existing.email,
-        funcao: existing.funcao,
-        data_criacao: existing.data_criacao,
-      })
+      .update(updateRow)
       .eq("id", id);
 
     if (error) {
