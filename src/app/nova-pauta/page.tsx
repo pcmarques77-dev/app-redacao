@@ -16,7 +16,8 @@ import {
   listReportersForSessionAction,
 } from "@/app/actions/pautas";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
-import type { PautaStatus } from "@/lib/pautas-shared";
+import type { PautaStatus, TipoMultimidia } from "@/lib/pautas-shared";
+import { MultimidiaField } from "@/components/MultimidiaField";
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -52,7 +53,8 @@ export default function NovaPautaPage() {
 
   const [reporterId, setReporterId] = useState("");
   const [tituloProvisorio, setTituloProvisorio] = useState("");
-  const [fontes, setFontes] = useState("");
+  const [multimidia, setMultimidia] = useState(false);
+  const [tiposMultimidia, setTiposMultimidia] = useState<TipoMultimidia[]>([]);
   const [editoria, setEditoria] = useState("Últimas Notícias");
   const [deadline, setDeadline] = useState("");
   const [status, setStatus] = useState<PautaStatus>("Sugerida");
@@ -143,6 +145,10 @@ export default function NovaPautaPage() {
         setErroFormPauta("Sessão inválida. Atualize a página e tente novamente.");
         return;
       }
+      if (multimidia && tiposMultimidia.length === 0) {
+        setErroFormPauta("Selecione ao menos um formato de multimídia.");
+        return;
+      }
 
       const deadlineOriginal = deadline.trim();
       const deadlineFinal = deadlineOriginal
@@ -152,12 +158,12 @@ export default function NovaPautaPage() {
       setSalvandoPauta(true);
       const insertRes = await createPautaAction({
         titulo_provisorio: titulo,
-        fontes: fontes.trim() || null,
         arquivos_urls: [],
         editoria,
         deadline: deadlineFinal,
         status,
-        demanda_multimidia: false,
+        demanda_multimidia: multimidia,
+        tipos_multimidia: multimidia ? tiposMultimidia : [],
         reporter_id: privilegedSession
           ? reporterId.trim()
           : sessionCtx!.userId,
@@ -175,12 +181,13 @@ export default function NovaPautaPage() {
     [
       deadline,
       editoria,
-      fontes,
+      multimidia,
       privilegedSession,
       reporterId,
       router,
       sessionCtx,
       status,
+      tiposMultimidia,
       tituloProvisorio,
     ]
   );
@@ -339,23 +346,16 @@ export default function NovaPautaPage() {
                     mês atual.
                   </p>
                 </div>
-                <div>
-                  <label
-                    htmlFor="fontes-nova"
-                    className="block text-sm font-medium text-slate-700"
-                  >
-                    Fontes e links
-                  </label>
-                  <textarea
-                    id="fontes-nova"
-                    name="fontes"
-                    value={fontes}
-                    onChange={(ev) => setFontes(ev.target.value)}
-                    rows={4}
-                    placeholder="Fontes e links"
-                    className="mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
-                  />
-                </div>
+                <MultimidiaField
+                  idPrefix="nova"
+                  checked={multimidia}
+                  selected={tiposMultimidia}
+                  onCheckedChange={(next) => {
+                    setMultimidia(next);
+                    if (!next) setTiposMultimidia([]);
+                  }}
+                  onSelectedChange={setTiposMultimidia}
+                />
 
                 <div>
                   <label

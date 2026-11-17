@@ -22,7 +22,7 @@ function resendFromAddress(): string {
  */
 export async function notifyEditorsDemandaMultimidia(
   admin: SupabaseClient,
-  args: { titulo: string; reporterNome: string; resumo: string | null }
+  args: { titulo: string; reporterNome: string; formatos: string[] }
 ): Promise<void> {
   const { data: editors, error } = await admin
     .from("usuarios")
@@ -56,11 +56,13 @@ export async function notifyEditorsDemandaMultimidia(
   const from = resendFromAddress();
   const resend = new Resend(apiKey);
   const subject = `🚩 Nova Demanda Multimídia: ${args.titulo}`;
-  const resumoText = args.resumo?.trim() || "—";
+  const formatosText =
+    args.formatos.map((formato) => formato.trim()).filter(Boolean).join(", ") ||
+    "—";
   const html = `
     <p><strong>Título</strong><br>${escapeHtml(args.titulo)}</p>
     <p><strong>Repórter responsável</strong><br>${escapeHtml(args.reporterNome)}</p>
-    <p><strong>Resumo</strong><br>${escapeHtml(resumoText).replace(/\n/g, "<br>")}</p>
+    <p><strong>Formatos</strong><br>${escapeHtml(formatosText)}</p>
   `;
 
   for (const recipient of listaEmails) {

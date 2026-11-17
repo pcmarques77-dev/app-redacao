@@ -7,7 +7,9 @@ import { notifyEditorsDemandaMultimidia } from "@/lib/demanda-multimidia-email";
 import {
   PAUTA_ACCESS_DENIED,
   coercePautaStatus,
+  coerceTiposMultimidia,
   isPautaStatus,
+  resolveDemandaMultimidia,
   type CreateHardNewsInput,
   type CreatePautaInput,
   type HardNewsQueueRow,
@@ -35,6 +37,7 @@ const UPDATE_KEYS = new Set([
   "status",
   "reporter_id",
   "demanda_multimidia",
+  "tipos_multimidia",
 ]);
 
 function getServiceClient() {
@@ -170,6 +173,7 @@ export async function listPautasDashboardAction(
         status,
         reporter_id,
         demanda_multimidia,
+        tipos_multimidia,
         reporter:usuarios!pautas_reporter_id_fkey(nome, email)
       `
     )
@@ -192,11 +196,15 @@ export async function listPautasDashboardAction(
         ? row.status
         : null;
     const rawDm = (row as { demanda_multimidia?: unknown }).demanda_multimidia;
+    const tipos = coerceTiposMultimidia(
+      (row as { tipos_multimidia?: unknown }).tipos_multimidia
+    );
     return {
       ...row,
       reporter: reporterNomeVisivel(row.reporter),
       status: coercePautaStatus(rawStatus),
-      demanda_multimidia: rawDm === true,
+      demanda_multimidia: rawDm === true || tipos.length > 0,
+      tipos_multimidia: tipos,
     };
   });
   return { ok: true, rows };
@@ -449,7 +457,11 @@ export async function createPautaAction(
     return { ok: false, error: "Status da pauta inválido." };
   }
 
-  const demanda_multimidia = input.demanda_multimidia === true;
+  const demanda = resolveDemandaMultimidia({
+    demanda_multimidia: input.demanda_multimidia,
+    tipos_multimidia: input.tipos_multimidia,
+  });
+  if (!demanda.ok) return demanda;
 
   const { error } = await admin.from("pautas").insert({
     titulo_provisorio: titulo,
@@ -459,12 +471,13 @@ export async function createPautaAction(
     deadline: input.deadline?.trim() ?? "",
     status: statusRaw,
     reporter_id,
-    demanda_multimidia,
+    demanda_multimidia: demanda.demanda_multimidia,
+    tipos_multimidia: demanda.tipos_multimidia,
   });
 
   if (error) return { ok: false, error: error.message };
 
-  if (demanda_multimidia) {
+  if (demanda.demanda_multimidia) {
     const { data: repRow } = await admin
       .from("usuarios")
       .select("nome, email")
@@ -475,7 +488,7 @@ export async function createPautaAction(
     await notifyEditorsDemandaMultimidia(admin, {
       titulo: titulo,
       reporterNome,
-      resumo: input.fontes?.trim() ? input.fontes.trim() : null,
+      formatos: demanda.tipos_multimidia,
     });
   }
 
@@ -523,12 +536,32 @@ export async function updatePautaAction(
     patchToApply = { ...patch, status: s };
   }
 
+  if (
+    patch.demanda_multimidia !== undefined ||
+    patch.tipos_multimidia !== undefined
+  ) {
+    const demanda = resolveDemandaMultimidia({
+      demanda_multimidia: patch.demanda_multimidia,
+      tipos_multimidia: patch.tipos_multimidia,
+    });
+    if (!demanda.ok) return demanda;
+    patchToApply = {
+      ...patchToApply,
+      demanda_multimidia: demanda.demanda_multimidia,
+      tipos_multimidia: demanda.tipos_multimidia,
+    };
+  }
+
   const sanitized: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patchToApply)) {
     if (!UPDATE_KEYS.has(k)) continue;
     if (v === undefined) continue;
     if (k === "demanda_multimidia") {
       sanitized[k] = v === true;
+      continue;
+    }
+    if (k === "tipos_multimidia") {
+      sanitized[k] = coerceTiposMultimidia(v);
       continue;
     }
     sanitized[k] = v;
@@ -554,7 +587,7 @@ export async function updatePautaAction(
     const { data: pRow } = await admin
       .from("pautas")
       .select(
-        "titulo_provisorio, fontes, reporter:usuarios!pautas_reporter_id_fkey(nome, email)"
+        "titulo_provisorio, tipos_multimidia, reporter:usuarios!pautas_reporter_id_fkey(nome, email)"
       )
       .eq("id", pautaId)
       .maybeSingle();
@@ -562,7 +595,9 @@ export async function updatePautaAction(
     if (pRow) {
       const titulo = (pRow as { titulo_provisorio?: string | null })
         .titulo_provisorio?.trim() || "Sem título";
-      const resumo = (pRow as { fontes?: string | null }).fontes ?? null;
+      const formatos = coerceTiposMultimidia(
+        (pRow as { tipos_multimidia?: unknown }).tipos_multimidia
+      );
       const rep = (
         pRow as {
           reporter?: { nome?: string | null; email?: string | null } | null;
@@ -572,7 +607,7 @@ export async function updatePautaAction(
       await notifyEditorsDemandaMultimidia(admin, {
         titulo,
         reporterNome,
-        resumo,
+        formatos,
       });
     }
   }

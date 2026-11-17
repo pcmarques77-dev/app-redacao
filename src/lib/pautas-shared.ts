@@ -23,6 +23,75 @@ export function coercePautaStatus(value: string | null | undefined): PautaStatus
   return isPautaStatus(v) ? v : "Sugerida";
 }
 
+export const TIPOS_MULTIMIDIA = [
+  "Viva Entrevista",
+  "Viva Compartilha",
+  "Viva Responde",
+  "Carrossel",
+] as const;
+
+export type TipoMultimidia = (typeof TIPOS_MULTIMIDIA)[number];
+
+const TIPO_MULTIMIDIA_SET = new Set<string>(TIPOS_MULTIMIDIA);
+
+export function isTipoMultimidia(value: string): value is TipoMultimidia {
+  return TIPO_MULTIMIDIA_SET.has(value);
+}
+
+/** Mantém só formatos conhecidos, na ordem fixa das opções do formulário. */
+export function coerceTiposMultimidia(value: unknown): TipoMultimidia[] {
+  if (!Array.isArray(value)) return [];
+  const found = new Set<TipoMultimidia>();
+  for (const item of value) {
+    if (typeof item === "string" && isTipoMultimidia(item)) found.add(item);
+  }
+  return TIPOS_MULTIMIDIA.filter((tipo) => found.has(tipo));
+}
+
+export function parseTiposMultimidia(
+  value: unknown
+): { ok: true; tipos: TipoMultimidia[] } | { ok: false; error: string } {
+  if (value == null) return { ok: true, tipos: [] };
+  if (!Array.isArray(value)) {
+    return { ok: false, error: "Selecione um formato de multimídia válido." };
+  }
+  for (const item of value) {
+    if (typeof item !== "string" || !isTipoMultimidia(item)) {
+      return { ok: false, error: "Selecione um formato de multimídia válido." };
+    }
+  }
+  return { ok: true, tipos: coerceTiposMultimidia(value) };
+}
+
+/** Liga a demanda ao que foi marcado. Sem formato, a demanda não é gravada. */
+export function resolveDemandaMultimidia(input: {
+  demanda_multimidia?: boolean;
+  tipos_multimidia?: unknown;
+}):
+  | {
+      ok: true;
+      demanda_multimidia: boolean;
+      tipos_multimidia: TipoMultimidia[];
+    }
+  | { ok: false; error: string } {
+  if (input.demanda_multimidia === false) {
+    return { ok: true, demanda_multimidia: false, tipos_multimidia: [] };
+  }
+  const parsed = parseTiposMultimidia(input.tipos_multimidia);
+  if (!parsed.ok) return parsed;
+  if (input.demanda_multimidia === true && parsed.tipos.length === 0) {
+    return {
+      ok: false,
+      error: "Selecione ao menos um formato de multimídia.",
+    };
+  }
+  return {
+    ok: true,
+    demanda_multimidia: parsed.tipos.length > 0,
+    tipos_multimidia: parsed.tipos,
+  };
+}
+
 export type PautaDashboardRow = {
   id: string;
   titulo_provisorio: string | null;
@@ -32,6 +101,7 @@ export type PautaDashboardRow = {
   reporter_id: string | null;
   reporter: { nome: string | null } | null;
   demanda_multimidia: boolean;
+  tipos_multimidia: TipoMultimidia[];
 };
 
 /** Alias semântico para o registro de pauta (`public.pautas`). */
@@ -56,6 +126,7 @@ export type CreatePautaInput = {
   status: PautaStatus;
   reporter_id?: string | null;
   demanda_multimidia?: boolean;
+  tipos_multimidia?: TipoMultimidia[] | null;
 };
 
 export type CreateHardNewsInput = {
@@ -72,4 +143,5 @@ export type UpdatePautaPatch = Partial<{
   status: PautaStatus;
   reporter_id: string;
   demanda_multimidia: boolean;
+  tipos_multimidia: TipoMultimidia[];
 }>;

@@ -47,6 +47,7 @@ import {
   PAUTA_ACCESS_DENIED,
   coercePautaStatus,
   type PautaStatus,
+  type TipoMultimidia,
 } from "@/lib/pautas-shared";
 import {
   deadlineTimeOfDayMinutes,
@@ -71,6 +72,7 @@ import {
   type StreamyardInitialValues,
 } from "@/components/StreamyardForm";
 import { PlannerMonthPicker } from "@/components/PlannerMonthPicker";
+import { MultimidiaField } from "@/components/MultimidiaField";
 import { PautasAppHeader, type PautasHeaderSession } from "@/components/PautasAppHeader";
 import {
   DASHBOARD_CAL_STORAGE_KEY,
@@ -115,6 +117,7 @@ type PautaRow = {
   reporter_id: string | null;
   reporter: { nome: string | null } | null;
   demanda_multimidia: boolean;
+  tipos_multimidia: TipoMultimidia[];
 };
 
 type EscalaRow = {
@@ -373,15 +376,31 @@ function formatHorizonRangeTitle(horizonStart: Date): string {
   return `${fmt(horizonStart)} – ${fmt(end)}`;
 }
 
-function statusCalendarChipClass(status: PautaStatus | null): string {
-  const n = normalizeStatus(status);
+function statusCalendarChipClass(
+  status: PautaStatus | null,
+  multimidia = false
+): string {
   const base =
-    "block w-full rounded border px-1.5 py-1 text-left text-[11px] font-medium leading-snug transition hover:ring-2 hover:ring-blue-400/40 focus-visible:outline focus-visible:ring-2 focus-visible:ring-blue-500";
-  if (n === "sugerida") return `${base} border-slate-200 bg-slate-100 text-slate-700`;
-  if (n === "em producao") return `${base} border-amber-200 bg-amber-100 text-amber-800`;
-  if (n === "pronto") return `${base} border-blue-200 bg-blue-100 text-blue-800`;
-  if (n === "publicada") return `${base} border-emerald-200 bg-emerald-100 text-emerald-800`;
-  return `${base} border-slate-200 bg-slate-100 text-slate-700`;
+    "block w-full rounded border px-1.5 py-1 text-left text-[11px] font-medium leading-snug transition hover:ring-2 focus-visible:outline focus-visible:ring-2";
+  if (multimidia) {
+    return `${base} border-[#c85adb]/70 bg-[#e8b6ef] text-[#4c1454] hover:bg-[#dfa4ea] hover:ring-[#c85adb]/45 focus-visible:ring-[#c85adb]`;
+  }
+  const n = normalizeStatus(status);
+  const statusHover =
+    "hover:ring-blue-400/40 focus-visible:ring-blue-500";
+  if (n === "sugerida") {
+    return `${base} ${statusHover} border-slate-200 bg-slate-100 text-slate-700`;
+  }
+  if (n === "em producao") {
+    return `${base} ${statusHover} border-amber-200 bg-amber-100 text-amber-800`;
+  }
+  if (n === "pronto") {
+    return `${base} ${statusHover} border-blue-200 bg-blue-100 text-blue-800`;
+  }
+  if (n === "publicada") {
+    return `${base} ${statusHover} border-emerald-200 bg-emerald-100 text-emerald-800`;
+  }
+  return `${base} ${statusHover} border-slate-200 bg-slate-100 text-slate-700`;
 }
 
 function statusContextOptionClass(status: PautaStatus, active: boolean): string {
@@ -993,7 +1012,7 @@ function PautasCalendar({
                   currentStatus: p.status,
                 });
               }}
-              className={`${statusCalendarChipClass(p.status)} w-full text-left ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
+              className={`${statusCalendarChipClass(p.status, p.demanda_multimidia)} w-full text-left ${canDrag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"}`}
             >
               <span className="flex items-start justify-between gap-1">
                 <span className="line-clamp-2">
@@ -1015,6 +1034,11 @@ function PautasCalendar({
               <span className="mt-0.5 block truncate text-[10px] font-normal opacity-80">
                 {p.editoria?.trim() || "—"}
               </span>
+              {p.demanda_multimidia ? (
+                <span className="mt-0.5 block truncate text-[10px] font-semibold">
+                  Multimídia
+                </span>
+              ) : null}
               <span className="mt-0.5 block truncate text-[10px] font-normal tabular-nums opacity-70">
                 {formatDeadlinePtBR(parseDeadlineToYmd(p.deadline))}
               </span>
@@ -1386,6 +1410,10 @@ export function PautasDashboard({
   const [modalReporterId, setModalReporterId] = useState("");
   const [modalEditoria, setModalEditoria] = useState("Últimas Notícias");
   const [modalStatus, setModalStatus] = useState<PautaStatus>("Sugerida");
+  const [modalMultimidia, setModalMultimidia] = useState(false);
+  const [modalTiposMultimidia, setModalTiposMultimidia] = useState<
+    TipoMultimidia[]
+  >([]);
   const [pautaCalendarioSomenteLeitura, setPautaCalendarioSomenteLeitura] =
     useState<PautaRow | null>(null);
   const [modalTab, setModalTab] = useState<
@@ -2299,6 +2327,8 @@ export function PautasDashboard({
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
     setModalStatus("Sugerida");
+    setModalMultimidia(false);
+    setModalTiposMultimidia([]);
     setModalSaving(false);
     setModalError(null);
     setModalReportersError(null);
@@ -2313,7 +2343,9 @@ export function PautasDashboard({
     const pautaDirty =
       modalTitulo.trim() !== "" ||
       modalResumo.trim() !== "" ||
-      modalReporterId.trim() !== "";
+      modalReporterId.trim() !== "" ||
+      modalMultimidia ||
+      modalTiposMultimidia.length > 0;
     if (pautaDirty || escalaFormDirty) {
       if (
         !window.confirm(
@@ -2330,6 +2362,8 @@ export function PautasDashboard({
     modalTitulo,
     modalResumo,
     modalReporterId,
+    modalMultimidia,
+    modalTiposMultimidia,
     escalaFormDirty,
     closeNovaPautaModal,
   ]);
@@ -2364,6 +2398,8 @@ export function PautasDashboard({
     setModalReporterId("");
     setModalEditoria("Últimas Notícias");
     setModalStatus("Sugerida");
+    setModalMultimidia(false);
+    setModalTiposMultimidia([]);
     setModalError(null);
     setModalReportersError(null);
     setModalTab("pauta");
@@ -2396,6 +2432,8 @@ export function PautasDashboard({
         setModalReporterId("");
         setModalEditoria("Últimas Notícias");
         setModalStatus("Sugerida");
+        setModalMultimidia(false);
+        setModalTiposMultimidia([]);
         setModalError(null);
         setModalReportersError(null);
         setModalTab("streamyard");
@@ -2423,6 +2461,8 @@ export function PautasDashboard({
         setModalReporterId("");
         setModalEditoria("Últimas Notícias");
         setModalStatus("Sugerida");
+        setModalMultimidia(false);
+        setModalTiposMultimidia([]);
         setModalError(null);
         setModalReportersError(null);
         setModalTab("notas");
@@ -2441,6 +2481,8 @@ export function PautasDashboard({
         setModalReporterId("");
         setModalEditoria("Últimas Notícias");
         setModalStatus("Sugerida");
+        setModalMultimidia(false);
+        setModalTiposMultimidia([]);
         setModalError(null);
         setModalReportersError(null);
         setModalTab("agenda");
@@ -2463,6 +2505,8 @@ export function PautasDashboard({
       setModalReporterId("");
       setModalEditoria("Últimas Notícias");
       setModalStatus("Sugerida");
+      setModalMultimidia(false);
+      setModalTiposMultimidia([]);
       setModalError(null);
       setModalReportersError(null);
       setModalTab("escala");
@@ -2490,6 +2534,10 @@ export function PautasDashboard({
         setModalError("Sessão inválida. Atualize a página e tente novamente.");
         return;
       }
+      if (modalMultimidia && modalTiposMultimidia.length === 0) {
+        setModalError("Selecione ao menos um formato de multimídia.");
+        return;
+      }
       setModalError(null);
       setModalSaving(true);
       const insertRes = await createPautaAction({
@@ -2502,7 +2550,8 @@ export function PautasDashboard({
         editoria: modalEditoria,
         status: modalStatus,
         arquivos_urls: [],
-        demanda_multimidia: false,
+        demanda_multimidia: modalMultimidia,
+        tipos_multimidia: modalMultimidia ? modalTiposMultimidia : [],
       });
       setModalSaving(false);
       if (!insertRes.ok) {
@@ -2519,6 +2568,8 @@ export function PautasDashboard({
       modalReporterId,
       modalResumo,
       modalStatus,
+      modalMultimidia,
+      modalTiposMultimidia,
       modalTitulo,
       privilegedSession,
       selectedDate,
@@ -3248,6 +3299,17 @@ export function PautasDashboard({
                       ))}
                     </select>
                   </div>
+                  <MultimidiaField
+                    idPrefix="modal-pauta"
+                    checked={modalMultimidia}
+                    selected={modalTiposMultimidia}
+                    disabled={modalSaving}
+                    onCheckedChange={(next) => {
+                      setModalMultimidia(next);
+                      if (!next) setModalTiposMultimidia([]);
+                    }}
+                    onSelectedChange={setModalTiposMultimidia}
+                  />
                   <div>
                     <label
                       htmlFor="modal-pauta-data"
@@ -3581,9 +3643,16 @@ export function PautasDashboard({
                   className="mt-0.5 h-4 w-4 shrink-0 cursor-not-allowed rounded border-slate-300 text-slate-900 opacity-90"
                 />
                 <label htmlFor="cal-sl-dm" className="text-sm text-slate-500">
-                  Demanda Multimídia
+                  Multimídia
                 </label>
               </div>
+              { (pautaCalendarioSomenteLeitura.tipos_multimidia ?? []).length > 0 ? (
+                <ul className="space-y-1 pl-6 text-sm text-slate-600">
+                  {(pautaCalendarioSomenteLeitura.tipos_multimidia ?? []).map((tipo) => (
+                    <li key={tipo}>{tipo}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             <div className="mt-6 flex flex-wrap justify-end gap-2">
               <Link

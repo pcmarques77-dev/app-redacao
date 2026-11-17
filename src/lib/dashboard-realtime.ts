@@ -2,6 +2,7 @@ import { isNotasTipo, normalizeEscalaTipoKey } from "@/lib/escala-constants";
 import { parseDeadlineToYmd } from "@/lib/deadline-date";
 import {
   coercePautaStatus,
+  coerceTiposMultimidia,
   type HardNewsQueueRow,
   type PautaDashboardRow,
   type PautaStatus,
@@ -106,10 +107,14 @@ function mapPautaRecord(
   if (statusRaw === undefined && !previous) return null;
 
   const demanda = raw.demanda_multimidia;
+  const hasTipos = Array.isArray(raw.tipos_multimidia);
+  const tipos = hasTipos
+    ? coerceTiposMultimidia(raw.tipos_multimidia)
+    : (previous?.tipos_multimidia ?? []);
   const demandaMultimidia =
     demanda === true || demanda === false
-      ? demanda
-      : (previous?.demanda_multimidia ?? false);
+      ? demanda === true
+      : (previous?.demanda_multimidia ?? tipos.length > 0);
 
   return {
     id: raw.id,
@@ -120,6 +125,7 @@ function mapPautaRecord(
     reporter_id: reporterRaw,
     reporter: reporterFromUsers(reporterRaw, users, previous),
     demanda_multimidia: demandaMultimidia,
+    tipos_multimidia: tipos,
   };
 }
 

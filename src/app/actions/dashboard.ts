@@ -14,6 +14,7 @@ import {
 } from "@/lib/escala-query-range";
 import {
   coercePautaStatus,
+  coerceTiposMultimidia,
   type PautaDashboardRow,
 } from "@/lib/pautas-shared";
 import {
@@ -65,6 +66,7 @@ const PAUTA_DASHBOARD_SELECT = `
           status,
           reporter_id,
           demanda_multimidia,
+          tipos_multimidia,
           reporter:usuarios!pautas_reporter_id_fkey(nome, email)
         `;
 
@@ -76,6 +78,7 @@ const PAUTA_DASHBOARD_SELECT_INNER = `
           status,
           reporter_id,
           demanda_multimidia,
+          tipos_multimidia,
           reporter:usuarios!pautas_reporter_id_fkey!inner(nome, email)
         `;
 
@@ -88,11 +91,15 @@ function mapDashboardPautas(data: unknown): PautaDashboardRow[] {
     const rawStatus =
       typeof row.status === "string" || row.status === null ? row.status : null;
     const rawDm = (row as { demanda_multimidia?: unknown }).demanda_multimidia;
+    const tipos = coerceTiposMultimidia(
+      (row as { tipos_multimidia?: unknown }).tipos_multimidia
+    );
     return {
       ...row,
       reporter: reporterNomeVisivel(row.reporter),
       status: coercePautaStatus(rawStatus),
-      demanda_multimidia: rawDm === true,
+      demanda_multimidia: rawDm === true || tipos.length > 0,
+      tipos_multimidia: tipos,
     };
   });
 }

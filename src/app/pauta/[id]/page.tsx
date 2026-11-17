@@ -23,10 +23,13 @@ import {
 import {
   PAUTA_ACCESS_DENIED,
   coercePautaStatus,
+  coerceTiposMultimidia,
   type PautaStatus,
+  type TipoMultimidia,
 } from "@/lib/pautas-shared";
 import { parseDeadlineToYmd } from "@/lib/deadline-date";
 import { EDITORIA_OPTIONS, STATUS_OPTIONS } from "@/lib/pauta-form-options";
+import { MultimidiaField } from "@/components/MultimidiaField";
 
 type ReporterOption = {
   id: string;
@@ -43,7 +46,8 @@ export default function EditarPauta() {
 
   const [reporters, setReporters] = useState<ReporterOption[]>([]);
   const [tituloProvisorio, setTituloProvisorio] = useState("");
-  const [fontes, setFontes] = useState("");
+  const [multimidia, setMultimidia] = useState(false);
+  const [tiposMultimidia, setTiposMultimidia] = useState<TipoMultimidia[]>([]);
   const [editoria, setEditoria] = useState("Últimas Notícias");
   const [reporterId, setReporterId] = useState("");
   const [deadline, setDeadline] = useState("");
@@ -117,7 +121,7 @@ export default function EditarPauta() {
         supabase
           .from("pautas")
           .select(
-            "titulo_provisorio, fontes, editoria, deadline, reporter_id, status"
+            "titulo_provisorio, editoria, deadline, reporter_id, status, demanda_multimidia, tipos_multimidia"
           )
           .eq("id", id)
           .maybeSingle(),
@@ -145,16 +149,19 @@ export default function EditarPauta() {
 
       const row = pautaRes.data as {
         titulo_provisorio: string | null;
-        fontes: string | null;
         editoria: string | null;
         deadline: string | null;
         reporter_id: string | null;
         status: string | null;
+        demanda_multimidia: boolean | null;
+        tipos_multimidia: string[] | null;
       };
 
+      const tipos = coerceTiposMultimidia(row.tipos_multimidia);
       setReporters((repResult.rows as ReporterOption[]) ?? []);
       setTituloProvisorio(row.titulo_provisorio?.trim() ?? "");
-      setFontes(row.fontes?.trim() ?? "");
+      setMultimidia(row.demanda_multimidia === true || tipos.length > 0);
+      setTiposMultimidia(tipos);
       setEditoria(row.editoria?.trim() || "Últimas Notícias");
       setReporterId(row.reporter_id?.trim() ?? "");
       setRowReporterId(row.reporter_id?.trim() ? row.reporter_id.trim() : null);
@@ -202,6 +209,10 @@ export default function EditarPauta() {
         setErroForm("Selecione um repórter.");
         return;
       }
+      if (multimidia && tiposMultimidia.length === 0) {
+        setErroForm("Selecione ao menos um formato de multimídia.");
+        return;
+      }
 
       const deadlineOriginal = deadline.trim();
       const anoAtual = new Date().getFullYear();
@@ -212,12 +223,12 @@ export default function EditarPauta() {
       setSalvando(true);
       const updateRes = await updatePautaAction(id, {
         titulo_provisorio: titulo,
-        fontes: fontes.trim() || null,
         arquivos_urls: [],
         editoria,
         deadline: deadlineFinal,
         status,
-        demanda_multimidia: false,
+        demanda_multimidia: multimidia,
+        tipos_multimidia: multimidia ? tiposMultimidia : [],
         reporter_id: reporterId.trim(),
       });
 
@@ -237,13 +248,14 @@ export default function EditarPauta() {
     [
       deadline,
       editoria,
-      fontes,
       id,
+      multimidia,
       reporterId,
       rowReporterId,
       router,
       sessionCtx,
       status,
+      tiposMultimidia,
       tituloProvisorio,
     ]
   );
@@ -308,8 +320,7 @@ export default function EditarPauta() {
               Apuração da pauta
             </h1>
             <p className="mt-2 text-sm text-slate-600">
-              Fontes, referências e dados da pauta — salve para sincronizar com o
-              painel.
+              Dados da pauta — salve para sincronizar com o painel.
             </p>
           </header>
 
@@ -424,6 +435,17 @@ export default function EditarPauta() {
                     Opcional. Se vazio, será usado 31/12 do ano atual.
                   </p>
                 </div>
+                <MultimidiaField
+                  idPrefix="edit"
+                  checked={multimidia}
+                  selected={tiposMultimidia}
+                  disabled={!editable}
+                  onCheckedChange={(next) => {
+                    setMultimidia(next);
+                    if (!next) setTiposMultimidia([]);
+                  }}
+                  onSelectedChange={setTiposMultimidia}
+                />
                 <div>
                   <label
                     htmlFor="edit-status"
@@ -445,24 +467,6 @@ export default function EditarPauta() {
                       </option>
                     ))}
                   </select>
-                </div>
-                <div>
-                  <label
-                    htmlFor="edit-fontes"
-                    className="block text-sm font-medium text-slate-700"
-                  >
-                    Fontes e links
-                  </label>
-                  <textarea
-                    id="edit-fontes"
-                    name="fontes"
-                    value={fontes}
-                    onChange={(ev) => setFontes(ev.target.value)}
-                    readOnly={!editable}
-                    rows={4}
-                    placeholder="Fontes e links"
-                    className="mt-1 w-full resize-y rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 read-only:bg-slate-50"
-                  />
                 </div>
 
                 {erroForm && (
